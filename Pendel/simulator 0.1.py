@@ -421,11 +421,11 @@ class PendulumApp(object):
 
         # Layout
         self.draw_view = PendulumView(self.model)
-        self.draw_view.flex = 'WH'
+        self.draw_view.flex = 'H'
         self.view.add_subview(self.draw_view)
 
         self.ctrl = ui.View()
-        self.ctrl.flex = 'LH'
+        self.ctrl.flex = 'H'
         self.ctrl.background_color = '#FAFAFA'
         self.view.add_subview(self.ctrl)
 
@@ -709,16 +709,33 @@ class PendulumApp(object):
         r = self.view.bounds
         total_w, total_h = r.w, r.h
         ctrl_w = 300
+        spacing = 12
+        side_pad = 12
+
+        # Safe-Area berücksichtigen (sofern verfügbar)
+        insets = getattr(self.view, 'safe_area_insets', None)
+        try:
+            inset_left = float(getattr(insets, 'left', 0) or 0)
+            inset_right = float(getattr(insets, 'right', 0) or 0)
+            inset_top = float(getattr(insets, 'top', 0) or 0)
+            inset_bottom = float(getattr(insets, 'bottom', 0) or 0)
+        except Exception:
+            inset_left = inset_right = inset_top = inset_bottom = 0.0
+
         if total_w >= 980:
-            # zwei Spalten
-            spacing = 12
-            self.draw_view.frame = (0, 0, total_w - ctrl_w - spacing, total_h)
-            self.ctrl.frame = (total_w - ctrl_w - spacing, 0, ctrl_w, total_h)
+            # Zwei Spalten: Zeichenfläche links, Steuerpanel rechts mit Abstand
+            left_x = side_pad + inset_left
+            ctrl_x = total_w - inset_right - side_pad - ctrl_w
+            draw_w = max(100, ctrl_x - spacing - left_x)
+            self.draw_view.frame = (left_x, 0, draw_w, total_h)
+            self.ctrl.frame = (ctrl_x, 0, ctrl_w, total_h)
         else:
-            # gestapelt
+            # Gestapelt untereinander auf kleineren Displays
             ctrl_h = min(420, total_h * 0.48)
-            self.draw_view.frame = (0, 0, total_w, total_h - ctrl_h)
-            self.ctrl.frame = (0, total_h - ctrl_h, total_w, ctrl_h)
+            content_w = max(100, total_w - side_pad - inset_left - side_pad - inset_right)
+            left_x = side_pad + inset_left
+            self.draw_view.frame = (left_x, 0, content_w, total_h - ctrl_h)
+            self.ctrl.frame = (left_x, total_h - ctrl_h, content_w, ctrl_h)
 
     # ---------- Controller-Aktionen ----------
     def toggle_run(self, sender):
