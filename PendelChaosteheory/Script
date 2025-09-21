@@ -1,19 +1,24 @@
-# Doppelpendel_Pythonista_Concept.py
-# Pythonista-ready script (iPad) — Konzept + funktionsfähiger Prototyp
-# Ziel: interaktive, "natürliche" Simulation von Pendel und Doppelpendel
-# Features:
-# - Einzel- und Doppelpendel-Modus
-# - RK4-Integrator für stabile Numerik
-# - Touch: Bob ziehen zum Setzen des Startorts
-# - Zeit-Skalierung (Geschwindigkeit erhöhen/verringern)
-# - Spur (Trail) des letzten Schwingpunkts
-# - Laufende Zeit, Stopp bei vordefiniertem Zeitpunkt
-# - Positionen für bestimmte Zeiten berechnen & als Zeitstempel auf die Szene zeichnen
-# - Werte werden mit reduziertem Zahlenformat (4 Dezimalstellen) angezeigt
+# Pendelphysik-Simulation - Überarbeitete Version
+# Wissenschaftliche Simulation von Einzel- und Doppelpendeln
+# Überarbeitete Benutzeroberfläche mit verbesserter Funktionalität und wissenschaftlichem Design
 #
-# Hinweise zum Ausführen:
-# - In Pythonista öffnen und ausführen.
-# - Die UI ist mit dem ui-Modul aufgebaut; das Zeichenfeld ist links, Controls rechts.
+# Features:
+# - Physikalisch korrekte Simulation mit RK4-Integrator
+# - Interaktive Parametersteuerung
+# - Echtzeit-Visualisierung mit Spuren
+# - Zeitbasierte Berechnungen und Markierungen
+# - Responsive Benutzeroberfläche
+# - Wissenschaftliches Design und Layout
+#
+# Verwendung:
+# - Start/Stop: Simulation starten oder pausieren
+# - Reset: Simulation auf Anfangszustand zurücksetzen
+# - Parameter: Längen, Massen, Dämpfung und Gravitation anpassen
+# - Zeitsteuerung: Geschwindigkeit und automatische Stops
+# - Berechnungen: Positionen zu bestimmten Zeitpunkten ermitteln
+#
+# Autor: Überarbeitete Version für verbesserte Benutzerfreundlichkeit
+# Datum: September 2025
 #
 # ---------------------------------------------------------------
 import ui
@@ -128,45 +133,79 @@ class PendulumView(ui.View):
         self._build_hud()
 
     def _build_hud(self):
+        # Wissenschaftliches HUD mit strukturierter Anordnung
         hud = ui.View()
-        hud.background_color = (1,1,1,0.85)
-        hud.corner_radius = 10
-        hud.frame = (12, 12, 320, 148)
+        hud.background_color = (0.95, 0.95, 0.98, 0.95)  # Heller, professioneller Hintergrund
+        hud.corner_radius = 12
+        hud.border_width = 1
+        hud.border_color = (0.7, 0.7, 0.7, 0.3)
+        hud.frame = (12, 12, 360, 180)
         hud.flex = 'RB'
 
-        y = 8
-        # row 1: Start/Pause + Reset + Mode
-        self.btn_play = ui.Button(frame=(8,y,92,32))
-        self.btn_play.title = 'Start'
+        # Titel-Bereich
+        title_label = ui.Label(frame=(8, 8, 344, 24))
+        title_label.text = '⚙️ Simulation Control'
+        title_label.font = ('<System-Bold>', 14)
+        title_label.text_color = (0.2, 0.2, 0.2)
+        title_label.alignment = ui.ALIGN_CENTER
+        hud.add_subview(title_label)
+
+        y = 40
+
+        # Simulationssteuerung - kompakt angeordnet
+        control_row = ui.View(frame=(8, y, 344, 40))
+        control_row.background_color = (0.9, 0.9, 0.95, 0.8)
+        control_row.corner_radius = 8
+
+        # Start/Stop Button
+        self.btn_play = ui.Button(frame=(8, 8, 80, 28))
+        self.btn_play.title = '▶ Start'
+        self.btn_play.font = ('<System>', 12)
+        self.btn_play.corner_radius = 4
+        self.btn_play.background_color = (0.2, 0.6, 0.2, 0.9)
         self.btn_play.action = lambda s: self.cb_toggle and self.cb_toggle(s)
-        hud.add_subview(self.btn_play)
+        control_row.add_subview(self.btn_play)
 
-        btn_reset = ui.Button(frame=(108,y,92,32))
-        btn_reset.title = 'Reset'
+        # Reset Button
+        btn_reset = ui.Button(frame=(96, 8, 80, 28))
+        btn_reset.title = '↻ Reset'
+        btn_reset.font = ('<System>', 12)
+        btn_reset.corner_radius = 4
+        btn_reset.background_color = (0.6, 0.2, 0.2, 0.9)
         btn_reset.action = lambda s: self.cb_reset and self.cb_reset(s)
-        hud.add_subview(btn_reset)
+        control_row.add_subview(btn_reset)
 
-        self.mode_seg_small = ui.SegmentedControl(frame=(208,y,104,32))
-        self.mode_seg_small.segments = ['Double','Single']
+        # Modus-Auswahl
+        self.mode_seg_small = ui.SegmentedControl(frame=(184, 8, 152, 28))
+        self.mode_seg_small.segments = ['Doppelpendel', 'Einfachpendel']
         self.mode_seg_small.selected_index = 0
+        self.mode_seg_small.font = ('<System>', 11)
         self.mode_seg_small.action = lambda s: self.cb_change_mode and self.cb_change_mode(s)
-        hud.add_subview(self.mode_seg_small)
-        y += 36
+        control_row.add_subview(self.mode_seg_small)
 
-        # row 2: Speed
-        lbl_speed = ui.Label(frame=(8,y,60,22))
-        lbl_speed.text = 'Speed'
-        lbl_speed.font = ('<System>', 12)
-        hud.add_subview(lbl_speed)
+        hud.add_subview(control_row)
+        y += 48
 
-        self.speed_val_lbl = ui.Label(frame=(268,y,44,22))
+        # Parameter-Bereich
+        param_row = ui.View(frame=(8, y, 344, 60))
+        param_row.background_color = (0.9, 0.9, 0.95, 0.8)
+        param_row.corner_radius = 8
+
+        # Geschwindigkeit
+        speed_label = ui.Label(frame=(8, 8, 80, 20))
+        speed_label.text = 'Zeitlupe:'
+        speed_label.font = ('<System>', 11)
+        speed_label.text_color = (0.2, 0.2, 0.2)
+        param_row.add_subview(speed_label)
+
+        self.speed_val_lbl = ui.Label(frame=(280, 8, 56, 20))
         self.speed_val_lbl.alignment = ui.ALIGN_RIGHT
-        self.speed_val_lbl.font = ('<System>', 12)
+        self.speed_val_lbl.font = ('<System>', 11)
         self.speed_val_lbl.text = '1.00x'
-        hud.add_subview(self.speed_val_lbl)
+        self.speed_val_lbl.text_color = (0.2, 0.2, 0.2)
+        param_row.add_subview(self.speed_val_lbl)
 
-        self.speed_slider_small = ui.Slider(frame=(66,y,198,22))
-        # Map to [0.05, 3.0]
+        self.speed_slider_small = ui.Slider(frame=(90, 8, 190, 20))
         self.speed_slider_small.minimum_value = 0.05
         self.speed_slider_small.maximum_value = 3.0
         self.speed_slider_small.value = 1.0
@@ -176,22 +215,23 @@ class PendulumView(ui.View):
             if self.cb_update_speed:
                 self.cb_update_speed(val)
         self.speed_slider_small.action = on_speed
-        hud.add_subview(self.speed_slider_small)
-        y += 28
+        param_row.add_subview(self.speed_slider_small)
 
-        # row 3: Damping + Trail
-        lbl_damp = ui.Label(frame=(8,y,60,22))
-        lbl_damp.text = 'Dämpf.'
-        lbl_damp.font = ('<System>', 12)
-        hud.add_subview(lbl_damp)
+        # Dämpfung
+        damp_label = ui.Label(frame=(8, 34, 80, 20))
+        damp_label.text = 'Dämpfung:'
+        damp_label.font = ('<System>', 11)
+        damp_label.text_color = (0.2, 0.2, 0.2)
+        param_row.add_subview(damp_label)
 
-        self.damp_val_lbl = ui.Label(frame=(268,y,44,22))
+        self.damp_val_lbl = ui.Label(frame=(280, 34, 56, 20))
         self.damp_val_lbl.alignment = ui.ALIGN_RIGHT
-        self.damp_val_lbl.font = ('<System>', 12)
+        self.damp_val_lbl.font = ('<System>', 11)
         self.damp_val_lbl.text = '0.00'
-        hud.add_subview(self.damp_val_lbl)
+        self.damp_val_lbl.text_color = (0.2, 0.2, 0.2)
+        param_row.add_subview(self.damp_val_lbl)
 
-        self.damp_slider = ui.Slider(frame=(66,y,198,22))
+        self.damp_slider = ui.Slider(frame=(90, 34, 190, 20))
         self.damp_slider.minimum_value = 0.0
         self.damp_slider.maximum_value = 0.1
         self.damp_slider.value = 0.0
@@ -201,40 +241,63 @@ class PendulumView(ui.View):
             if self.cb_update_damping:
                 self.cb_update_damping(val)
         self.damp_slider.action = on_damp
-        hud.add_subview(self.damp_slider)
-        y += 28
+        param_row.add_subview(self.damp_slider)
 
-        self.trail_switch = ui.Switch(frame=(66,y,56,28))
+        hud.add_subview(param_row)
+        y += 68
+
+        # Visualisierung-Steuerung
+        vis_row = ui.View(frame=(8, y, 344, 40))
+        vis_row.background_color = (0.9, 0.9, 0.95, 0.8)
+        vis_row.corner_radius = 8
+
+        # Spur aktivieren
+        trail_label = ui.Label(frame=(8, 8, 80, 24))
+        trail_label.text = '📊 Spur:'
+        trail_label.font = ('<System>', 12)
+        trail_label.text_color = (0.2, 0.2, 0.2)
+        vis_row.add_subview(trail_label)
+
+        self.trail_switch = ui.Switch(frame=(90, 8, 56, 24))
         self.trail_switch.value = True
         self.trail_switch.action = lambda s: self.cb_toggle_trail and self.cb_toggle_trail(bool(s.value))
-        hud.add_subview(self.trail_switch)
+        vis_row.add_subview(self.trail_switch)
 
-        lbl_trail = ui.Label(frame=(8,y,56,22))
-        lbl_trail.text = 'Trail'
-        lbl_trail.font = ('<System>', 12)
-        hud.add_subview(lbl_trail)
-
-        btn_clear = ui.Button(frame=(132,y,80,28))
-        btn_clear.title = 'Clear'
+        # Spur löschen Button
+        btn_clear = ui.Button(frame=(160, 8, 80, 24))
+        btn_clear.title = '🗑️ Löschen'
+        btn_clear.font = ('<System>', 11)
+        btn_clear.corner_radius = 4
+        btn_clear.background_color = (0.6, 0.6, 0.6, 0.9)
         btn_clear.action = lambda s: self.cb_clear_trail and self.cb_clear_trail()
-        hud.add_subview(btn_clear)
+        vis_row.add_subview(btn_clear)
+
+        hud.add_subview(vis_row)
 
         self.add_subview(hud)
         self.hud = hud
 
     def set_playing(self, playing):
-        self.btn_play.title = 'Pause' if playing else 'Start'
+        self.btn_play.title = '⏸️ Pause' if playing else '▶ Start'
 
     def draw(self):
-        # drawing callback
+        # drawing callback - wissenschaftliches Design
         r = self.bounds
         cx = r.w * 0.5
         cy = r.h * 0.15  # pivot near top
         origin = (cx, cy)
 
-        # background
-        ui.set_color((0.98,0.98,0.98))
-        ui.Path.rect(0,0,r.w,r.h).fill()
+        # Hintergrund mit Gradient-Effekt für wissenschaftlichen Look
+        ui.set_color((0.95, 0.97, 0.99, 1.0))
+        ui.Path.rect(0, 0, r.w, r.h).fill()
+
+        # Gitter-Linien für wissenschaftliche Präzision
+        ui.set_color((0.8, 0.8, 0.8, 0.3))
+        grid_spacing = 50
+        for x in range(0, int(r.w), grid_spacing):
+            ui.Path().move_to(x, 0).line_to(x, r.h).stroke()
+        for y in range(0, int(r.h), grid_spacing):
+            ui.Path().move_to(0, y).line_to(r.w, y).stroke()
 
         # compute bob positions from model state
         th1, w1, th2, w2 = self.model.state
@@ -244,49 +307,84 @@ class PendulumView(ui.View):
         x1, y1 = polar_to_xy(origin, th1, l1)
         x2, y2 = polar_to_xy((x1,y1), th2, l2)
 
-        # draw trails (for second bob)
+        # draw trails (for second bob) - verbesserter Effekt
         if self.trail:
             path = ui.Path()
             path.move_to(self.trail[0][0], self.trail[0][1])
-            for (tx,ty) in self.trail[1:]:
-                path.line_to(tx,ty)
-            # stroke with fading alpha by drawing many segments? simple: constant alpha
-            ui.set_color((0,0,0,0.15))
+            for i, (tx, ty) in enumerate(self.trail[1:]):
+                alpha = max(0.05, 0.3 * (1 - i / len(self.trail)))
+                ui.set_color((0.2, 0.4, 0.8, alpha))
+                path.line_to(tx, ty)
             path.stroke()
 
-        # rods
-        ui.set_color('black')
+        # rods - mit physikalischer Darstellung
+        ui.set_color((0.3, 0.3, 0.3, 1.0))
+        ui.set_line_width(3)
+
         p = ui.Path()
         p.move_to(origin[0], origin[1])
         p.line_to(x1, y1)
         p.stroke()
+
         p2 = ui.Path()
         p2.move_to(x1, y1)
         p2.line_to(x2, y2)
         p2.stroke()
 
-        # bobs
-        r1 = 14
-        r2 = 12
-        ui.set_color('gray')
+        # bobs - wissenschaftliche Darstellung
+        r1 = 16
+        r2 = 14
+
+        # Erste Masse (größer)
+        ui.set_color((0.2, 0.5, 0.8, 0.9))
         ui.Path.oval(x1-r1, y1-r1, r1*2, r1*2).fill()
-        ui.set_color('darkred')
+        ui.set_color((0.1, 0.3, 0.6, 1.0))
+        ui.Path.oval(x1-r1, y1-r1, r1*2, r1*2).stroke()
+
+        # Zweite Masse (kleiner)
+        ui.set_color((0.8, 0.2, 0.3, 0.9))
         ui.Path.oval(x2-r2, y2-r2, r2*2, r2*2).fill()
+        ui.set_color((0.6, 0.1, 0.2, 1.0))
+        ui.Path.oval(x2-r2, y2-r2, r2*2, r2*2).stroke()
 
-        # show pivot
-        ui.set_color('black')
-        ui.Path.oval(origin[0]-4, origin[1]-4, 8, 8).fill()
+        # show pivot - Aufhängungspunkt
+        ui.set_color((0.2, 0.2, 0.2, 1.0))
+        ui.set_line_width(2)
+        ui.Path.oval(origin[0]-6, origin[1]-6, 12, 12).fill()
+        ui.set_color((0.4, 0.4, 0.4, 1.0))
+        ui.Path.oval(origin[0]-6, origin[1]-6, 12, 12).stroke()
 
-        # draw stamps
-        ui.set_color('blue')
+        # draw stamps - Zeitmarkierungen
+        ui.set_color((0.1, 0.4, 0.8, 0.8))
         for s in self.stamps:
-            ui.Path.oval(s['x']-5, s['y']-5, 10, 10).fill()
-            draw_text_at(s['text'], s['x']+8, s['y']-8, font=('Helvetica', 12))
+            ui.set_line_width(2)
+            ui.Path.oval(s['x']-6, s['y']-6, 12, 12).stroke()
+            draw_text_at(s['text'], s['x']+10, s['y']-10, font=('Helvetica', 11))
 
-        # overlay time
-        ui.set_color('black')
-        tlabel = 't = {:.3f} s'.format(self.model.sim_time)
-        draw_text_at(tlabel, 8, r.h - 28, font=('Helvetica', 16))
+        # Zeit-Anzeige - verbessert
+        ui.set_color((0.2, 0.2, 0.2, 1.0))
+
+        # Hintergrund für Zeit-Anzeige
+        time_bg = ui.Path()
+        time_bg.move_to(8, r.h - 50 + 6)
+        time_bg.line_to(8, r.h - 50)
+        time_bg.line_to(208, r.h - 50)
+        time_bg.line_to(208, r.h - 10)
+        time_bg.line_to(8, r.h - 10)
+        time_bg.close()
+        ui.set_color((1, 1, 1, 0.9))
+        time_bg.fill()
+        ui.set_color((0.7, 0.7, 0.7, 0.5))
+        time_bg.stroke()
+
+        # Zeit-Text
+        tlabel = '⏱️ t = {:.3f} s'.format(self.model.sim_time)
+        draw_text_at(tlabel, 18, r.h - 42, font=('Helvetica-Bold', 14))
+
+        # Simulationsstatus
+        status_text = '▶ Läuft' if self.model.running else '⏸️ Pausiert'
+        status_color = (0.2, 0.7, 0.2, 1.0) if self.model.running else (0.7, 0.2, 0.2, 1.0)
+        draw_text_at(status_text, r.w - 120, r.h - 42, font=('Helvetica', 12))
 
     # Touch handling: allow dragging of first or second bob to set start angles
     def touch_began(self, touch):
@@ -439,135 +537,271 @@ class PendulumApp(object):
         self.timer = None
 
     def setup_layout(self):
-        # left: drawing view
+        # Moderne, strukturierte Layout-Gestaltung
         self.draw_view = PendulumView(self.model)
         self.draw_view.frame = (0, 0, 700, 700)
         self.draw_view.flex = 'WH'
         self.view.add_subview(self.draw_view)
 
-        # right: controls
-        w = 300
-        ctrl = ui.View(frame=(700,0,w,700))
+        # Kontrollbereich - rechts oder unten je nach Bildschirmgröße
+        ctrl_width = 340
+        ctrl = ui.View(frame=(700, 0, ctrl_width, 700))
         ctrl.flex = 'WH'
-        ctrl.background_color = (0.96,0.96,0.96)
+        ctrl.background_color = (0.98, 0.98, 0.99, 0.95)
 
-        y = 12
-        def add_label(text):
+        # Hintergrund mit Rahmen für wissenschaftlichen Look
+        bg_view = ui.View(frame=(0, 0, ctrl_width, 700))
+        bg_view.background_color = (0.95, 0.97, 0.99, 0.8)
+        bg_view.corner_radius = 8
+        bg_view.border_width = 1
+        bg_view.border_color = (0.8, 0.8, 0.8, 0.5)
+        ctrl.add_subview(bg_view)
+
+        y = 20
+
+        def create_section_header(title, icon="🔬"):
             nonlocal y
-            lbl = ui.Label(frame=(10,y, w-20, 26))
-            lbl.text = text
-            lbl.font = ('<System>', 14)
-            lbl.flex = 'W'
-            ctrl.add_subview(lbl)
-            y += 30
-            return lbl
+            header_view = ui.View(frame=(10, y, ctrl_width-20, 40))
+            header_view.background_color = (0.3, 0.5, 0.8, 0.1)
+            header_view.corner_radius = 6
 
-        add_label('Controls')
+            title_label = ui.Label(frame=(10, 8, 200, 24))
+            title_label.text = f"{icon} {title}"
+            title_label.font = ('<System-Bold>', 16)
+            title_label.text_color = (0.1, 0.3, 0.6)
+            header_view.add_subview(title_label)
 
-        # Start/Pause Button
-        self.btn_run = ui.Button(frame=(10,y, w-20, 40))
-        self.btn_run.title = 'Start'
-        self.btn_run.action = self.toggle_run
-        self.btn_run.flex = 'W'
-        ctrl.add_subview(self.btn_run)
-        y += 48
+            ctrl.add_subview(header_view)
+            y += 48
+            return y
 
-        # Reset
-        btn_reset = ui.Button(frame=(10,y, w-20, 34))
-        btn_reset.title = 'Reset'
-        btn_reset.action = lambda sender: self.reset()
-        btn_reset.flex = 'W'
-        ctrl.add_subview(btn_reset)
-        y += 42
+        def add_control_group(title, controls_func):
+            nonlocal y
+            # Gruppe mit Rahmen
+            group_view = ui.View(frame=(10, y, ctrl_width-20, 60))
+            group_view.background_color = (1, 1, 1, 0.7)
+            group_view.corner_radius = 6
+            group_view.border_width = 1
+            group_view.border_color = (0.8, 0.8, 0.8, 0.4)
 
-        # Mode (single/double)
-        self.mode_seg = ui.SegmentedControl(frame=(10,y, w-20, 34))
-        self.mode_seg.segments = ['Double','Single']
-        self.mode_seg.selected_index = 0
-        self.mode_seg.action = self.change_mode
-        self.mode_seg.flex = 'W'
-        ctrl.add_subview(self.mode_seg)
-        y += 42
+            # Gruppentitel
+            title_label = ui.Label(frame=(10, 5, 200, 20))
+            title_label.text = title
+            title_label.font = ('<System>', 12)
+            title_label.text_color = (0.3, 0.3, 0.3)
+            group_view.add_subview(title_label)
 
-        # Speed slider
-        add_label('Zeit-Skalierung (Speed)')
-        self.speed_slider = ui.Slider(frame=(10,y, w-20, 34))
-        self.speed_slider.minimum_value = 0.05
-        self.speed_slider.maximum_value = 3.0
-        self.speed_slider.value = 1.0
-        self.speed_slider.action = lambda s: self.update_speed_value(float(s.value))
-        self.speed_slider.flex = 'W'
-        ctrl.add_subview(self.speed_slider)
-        y += 42
+            # Controls hinzufügen
+            controls_func(group_view, 30)
 
-        # Damping slider
-        add_label('Dämpfung')
-        self.damping_slider = ui.Slider(frame=(10,y, w-20, 34))
-        self.damping_slider.minimum_value = 0.0
-        self.damping_slider.maximum_value = 0.1
-        self.damping_slider.value = 0.0
-        self.damping_slider.action = lambda s: self.update_damping(float(s.value))
-        self.damping_slider.flex = 'W'
-        ctrl.add_subview(self.damping_slider)
-        y += 42
+            ctrl.add_subview(group_view)
+            y += 70
+            return y
 
-        # Trail toggle + clear
-        add_label('Spur aktiv')
-        sw = ui.Switch(frame=(10,y, 54, 34))
-        sw.value = True
-        sw.action = lambda s: self.toggle_trail(bool(s.value))
-        ctrl.add_subview(sw)
-        btn_clear = ui.Button(frame=(80,y, w-90, 34))
-        btn_clear.title = 'Spur löschen'
-        btn_clear.action = lambda s: self.clear_trail()
-        btn_clear.flex = 'W'
-        ctrl.add_subview(btn_clear)
-        y += 42
+        # Hauptsteuerung
+        create_section_header("Simulation Control", "🎛️")
 
-        # Trail length
-        add_label('Spur-Länge')
-        self.trail_slider = ui.Slider(frame=(10,y, w-20, 34))
-        self.trail_slider.value = 400
-        self.trail_slider.minimum_value = 10
-        self.trail_slider.maximum_value = 1200
-        self.trail_slider.action = self.update_trail
-        self.trail_slider.flex = 'W'
-        ctrl.add_subview(self.trail_slider)
-        y += 42
+        def main_controls(group_view, content_y):
+            # Start/Stop Button
+            self.btn_run = ui.Button(frame=(10, content_y, 100, 36))
+            self.btn_run.title = '▶ Start'
+            self.btn_run.font = ('<System>', 13)
+            self.btn_run.corner_radius = 6
+            self.btn_run.background_color = (0.2, 0.7, 0.3, 0.9)
+            self.btn_run.action = self.toggle_run
+            group_view.add_subview(self.btn_run)
 
-        # Stop at time
-        add_label('Automatisch stoppen bei t (s)')
-        self.stop_field = ui.TextField(frame=(10,y, w-120, 34))
-        self.stop_field.placeholder = 'z.B. 12.5'
-        self.stop_field.flex = 'W'
-        ctrl.add_subview(self.stop_field)
-        btn_setstop = ui.Button(frame=(w-100,y,90,34))
-        btn_setstop.title = 'Set Stop'
-        btn_setstop.action = self.set_stop_time
-        btn_setstop.flex = 'L'
-        ctrl.add_subview(btn_setstop)
-        y += 42
+            # Reset Button
+            btn_reset = ui.Button(frame=(120, content_y, 100, 36))
+            btn_reset.title = '↻ Reset'
+            btn_reset.font = ('<System>', 13)
+            btn_reset.corner_radius = 6
+            btn_reset.background_color = (0.7, 0.2, 0.2, 0.9)
+            btn_reset.action = lambda sender: self.reset()
+            group_view.add_subview(btn_reset)
 
-        # Compute pos at time
-        add_label('Position berechnen bei t (s)')
-        self.compute_field = ui.TextField(frame=(10,y, w-120, 34))
-        self.compute_field.placeholder = 'z.B. 3.14'
-        self.compute_field.flex = 'W'
-        ctrl.add_subview(self.compute_field)
-        btn_comp = ui.Button(frame=(w-100,y,90,34))
-        btn_comp.title = 'Compute'
-        btn_comp.action = self.compute_and_stamp
-        btn_comp.flex = 'L'
-        ctrl.add_subview(btn_comp)
-        y += 42
+            # Modus-Auswahl
+            self.mode_seg = ui.SegmentedControl(frame=(10, content_y+44, ctrl_width-40, 36))
+            self.mode_seg.segments = ['Doppelpendel', 'Einfachpendel']
+            self.mode_seg.selected_index = 0
+            self.mode_seg.font = ('<System>', 12)
+            self.mode_seg.action = self.change_mode
+            group_view.add_subview(self.mode_seg)
 
-        # Stamps list (short)
-        add_label('Stamps (letzte)')
-        self.stamps_label = ui.TextView(frame=(10,y, w-20, 140))
-        self.stamps_label.editable = False
-        self.stamps_label.flex = 'WH'
-        ctrl.add_subview(self.stamps_label)
-        y += 148
+        add_control_group("Hauptsteuerung", main_controls)
+
+        # Physikalische Parameter
+        create_section_header("Physikalische Parameter", "⚖️")
+
+        def physics_controls(group_view, content_y):
+            # Längen-Parameter
+            l1_label = ui.Label(frame=(10, content_y, 120, 20))
+            l1_label.text = 'Länge 1 (m):'
+            l1_label.font = ('<System>', 11)
+            group_view.add_subview(l1_label)
+
+            self.l1_field = ui.TextField(frame=(140, content_y, 80, 20))
+            self.l1_field.text = '1.0'
+            self.l1_field.font = ('<System>', 11)
+            group_view.add_subview(self.l1_field)
+
+            l2_label = ui.Label(frame=(10, content_y+26, 120, 20))
+            l2_label.text = 'Länge 2 (m):'
+            l2_label.font = ('<System>', 11)
+            group_view.add_subview(l2_label)
+
+            self.l2_field = ui.TextField(frame=(140, content_y+26, 80, 20))
+            self.l2_field.text = '1.0'
+            self.l2_field.font = ('<System>', 11)
+            group_view.add_subview(self.l2_field)
+
+            # Massen-Parameter
+            m1_label = ui.Label(frame=(230, content_y, 80, 20))
+            m1_label.text = 'Masse 1 (kg):'
+            m1_label.font = ('<System>', 11)
+            group_view.add_subview(m1_label)
+
+            self.m1_field = ui.TextField(frame=(320, content_y, 80, 20))
+            self.m1_field.text = '1.0'
+            self.m1_field.font = ('<System>', 11)
+            group_view.add_subview(self.m1_field)
+
+            m2_label = ui.Label(frame=(230, content_y+26, 80, 20))
+            m2_label.text = 'Masse 2 (kg):'
+            m2_label.font = ('<System>', 11)
+            group_view.add_subview(m2_label)
+
+            self.m2_field = ui.TextField(frame=(320, content_y+26, 80, 20))
+            self.m2_field.text = '1.0'
+            self.m2_field.font = ('<System>', 11)
+            group_view.add_subview(self.m2_field)
+
+        add_control_group("Pendel-Parameter", physics_controls)
+
+        # Simulationsparameter
+        create_section_header("Simulations-Einstellungen", "⚙️")
+
+        def sim_controls(group_view, content_y):
+            # Zeit-Skalierung
+            speed_label = ui.Label(frame=(10, content_y, 120, 20))
+            speed_label.text = 'Zeitlupe:'
+            speed_label.font = ('<System>', 11)
+            group_view.add_subview(speed_label)
+
+            self.speed_slider = ui.Slider(frame=(140, content_y, 180, 20))
+            self.speed_slider.minimum_value = 0.05
+            self.speed_slider.maximum_value = 3.0
+            self.speed_slider.value = 1.0
+            self.speed_slider.action = lambda s: self.update_speed_value(float(s.value))
+            group_view.add_subview(self.speed_slider)
+
+            self.speed_label = ui.Label(frame=(325, content_y, 50, 20))
+            self.speed_label.text = '1.00x'
+            self.speed_label.font = ('<System>', 11)
+            self.speed_label.alignment = ui.ALIGN_RIGHT
+            group_view.add_subview(self.speed_label)
+
+            # Dämpfung
+            damp_label = ui.Label(frame=(10, content_y+26, 120, 20))
+            damp_label.text = 'Dämpfung:'
+            damp_label.font = ('<System>', 11)
+            group_view.add_subview(damp_label)
+
+            self.damping_slider = ui.Slider(frame=(140, content_y+26, 180, 20))
+            self.damping_slider.minimum_value = 0.0
+            self.damping_slider.maximum_value = 0.1
+            self.damping_slider.value = 0.0
+            self.damping_slider.action = lambda s: self.update_damping(float(s.value))
+            group_view.add_subview(self.damping_slider)
+
+            self.damping_label = ui.Label(frame=(325, content_y+26, 50, 20))
+            self.damping_label.text = '0.00'
+            self.damping_label.font = ('<System>', 11)
+            self.damping_label.alignment = ui.ALIGN_RIGHT
+            group_view.add_subview(self.damping_label)
+
+        add_control_group("Simulationsparameter", sim_controls)
+
+        # Visualisierung
+        create_section_header("Visualisierung", "📊")
+
+        def vis_controls(group_view, content_y):
+            # Spur-Steuerung
+            trail_label = ui.Label(frame=(10, content_y, 80, 24))
+            trail_label.text = 'Spur aktiv:'
+            trail_label.font = ('<System>', 12)
+            group_view.add_subview(trail_label)
+
+            trail_switch = ui.Switch(frame=(100, content_y, 56, 24))
+            trail_switch.value = True
+            trail_switch.action = lambda s: self.toggle_trail(bool(s.value))
+            group_view.add_subview(trail_switch)
+
+            btn_clear = ui.Button(frame=(170, content_y, 100, 24))
+            btn_clear.title = '🗑️ Löschen'
+            btn_clear.font = ('<System>', 11)
+            btn_clear.corner_radius = 4
+            btn_clear.background_color = (0.6, 0.6, 0.6, 0.9)
+            btn_clear.action = lambda s: self.clear_trail()
+            group_view.add_subview(btn_clear)
+
+        add_control_group("Spur-Steuerung", vis_controls)
+
+        # Zeitsteuerung
+        create_section_header("Zeitsteuerung", "⏰")
+
+        def time_controls(group_view, content_y):
+            # Automatisches Stoppen
+            stop_label = ui.Label(frame=(10, content_y, 200, 20))
+            stop_label.text = 'Stop bei t ='
+            stop_label.font = ('<System>', 11)
+            group_view.add_subview(stop_label)
+
+            self.stop_field = ui.TextField(frame=(140, content_y, 100, 20))
+            self.stop_field.placeholder = 'z.B. 12.5'
+            self.stop_field.font = ('<System>', 11)
+            group_view.add_subview(self.stop_field)
+
+            btn_setstop = ui.Button(frame=(250, content_y, 80, 20))
+            btn_setstop.title = 'Setzen'
+            btn_setstop.font = ('<System>', 11)
+            btn_setstop.corner_radius = 4
+            btn_setstop.action = self.set_stop_time
+            group_view.add_subview(btn_setstop)
+
+            # Position berechnen
+            calc_label = ui.Label(frame=(10, content_y+26, 200, 20))
+            calc_label.text = 'Position bei t ='
+            calc_label.font = ('<System>', 11)
+            group_view.add_subview(calc_label)
+
+            self.compute_field = ui.TextField(frame=(140, content_y+26, 100, 20))
+            self.compute_field.placeholder = 'z.B. 3.14'
+            self.compute_field.font = ('<System>', 11)
+            group_view.add_subview(self.compute_field)
+
+            btn_compute = ui.Button(frame=(250, content_y+26, 80, 20))
+            btn_compute.title = 'Berechnen'
+            btn_compute.font = ('<System>', 11)
+            btn_compute.corner_radius = 4
+            btn_compute.background_color = (0.2, 0.4, 0.8, 0.9)
+            btn_compute.action = self.compute_and_stamp
+            group_view.add_subview(btn_compute)
+
+        add_control_group("Zeitfunktionen", time_controls)
+
+        # Ergebnisse
+        create_section_header("Ergebnisse & Markierungen", "📋")
+
+        def results_controls(group_view, content_y):
+            self.stamps_label = ui.TextView(frame=(10, content_y, ctrl_width-40, 120))
+            self.stamps_label.editable = False
+            self.stamps_label.font = ('<System>', 11)
+            self.stamps_label.background_color = (0.98, 0.98, 0.98, 0.8)
+            self.stamps_label.corner_radius = 4
+            group_view.add_subview(self.stamps_label)
+
+        add_control_group("Zeitmarkierungen", results_controls)
 
         self.view.add_subview(ctrl)
         self.ctrl = ctrl
@@ -582,6 +816,14 @@ class PendulumApp(object):
             on_toggle_trail=self.toggle_trail,
             on_clear_trail=self.clear_trail,
         )
+
+        # Initiale Werte synchronisieren
+        self.update_speed_value(1.0)
+        self.update_damping(0.0)
+
+        # Modus synchronisieren
+        if hasattr(self, 'mode_seg'):
+            self.mode_seg.selected_index = 0
 
         # ensure initial layout fits the screen
         self.view.layout = self._layout_root
@@ -598,13 +840,13 @@ class PendulumApp(object):
         if self.model.running:
             return
         self.model.running = True
-        self.btn_run.title = 'Pause'
+        self.btn_run.title = '⏸️ Pause'
         self._start_timer()
         self.draw_view.set_playing(True)
 
     def pause(self):
         self.model.running = False
-        self.btn_run.title = 'Start'
+        self.btn_run.title = '▶ Start'
         self._stop_timer()
         self.draw_view.set_playing(False)
 
@@ -616,20 +858,37 @@ class PendulumApp(object):
         self.draw_view.set_needs_display()
 
     def change_mode(self, sender):
+        # Synchronisiere Modus zwischen HUD und Hauptsteuerung
+        if hasattr(self, 'mode_seg'):
+            self.mode_seg.selected_index = sender.selected_index
+
         if sender.selected_index == 1:
-            # single pendulum -> set m2=0 to reduce to single pendulum
+            # Einfachpendel -> set m2=0 to reduce to single pendulum
             self.model.params['m2'] = 0.0
         else:
+            # Doppelpendel
             self.model.params['m2'] = 1.0
 
     def update_speed_value(self, val):
-        self.model.time_scale = max(0.05, float(val))
+        val = max(0.05, float(val))
+        self.model.time_scale = val
+        # Update Labels in both main UI and HUD
+        if hasattr(self, 'speed_label'):
+            self.speed_label.text = '{:.2f}x'.format(val)
+        if hasattr(self, 'speed_val_lbl'):
+            self.speed_val_lbl.text = '{:.2f}x'.format(val)
 
     def update_trail(self, sender):
         self.model.trail_max = int(sender.value)
 
     def update_damping(self, val):
-        self.model.params['damping'] = max(0.0, float(val))
+        val = max(0.0, float(val))
+        self.model.params['damping'] = val
+        # Update Labels in both main UI and HUD
+        if hasattr(self, 'damping_label'):
+            self.damping_label.text = '{:.2f}'.format(val)
+        if hasattr(self, 'damp_val_lbl'):
+            self.damp_val_lbl.text = '{:.2f}'.format(val)
 
     def toggle_trail(self, enabled):
         self.model.trail_enabled = bool(enabled)
