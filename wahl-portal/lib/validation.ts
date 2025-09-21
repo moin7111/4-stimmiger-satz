@@ -18,6 +18,24 @@ export const studentCreateSchema = z.object({
   classGroupId: z.number().int().positive(),
 });
 
+export const studentUpdateSchema = z.object({
+  studentId: z.string().uuid(),
+  firstName: z.string().min(1).max(100).optional(),
+  lastName: z.string().min(1).max(100).optional(),
+  classGroupId: z.number().int().positive().optional(),
+  assignedProjectId: z.number().int().positive().nullable().optional(),
+  choices: z
+    .array(
+      z.object({
+        projectId: z.number().int().positive(),
+        rank: z.number().int().min(1).max(3),
+      }),
+    )
+    .min(1)
+    .max(3)
+    .optional(),
+});
+
 export const selectionDirectSchema = z.object({
   studentId: z.string().uuid(),
   projectId: z.number().int().positive(),

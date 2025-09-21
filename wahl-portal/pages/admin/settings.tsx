@@ -16,6 +16,9 @@ export default function AdminSettings() {
   const [newClassName, setNewClassName] = useState("");
   const [projectForm, setProjectForm] = useState({ name: "", leader: "", description: "", capacity: 20, allowedClassIds: [] as number[] });
   const [msg, setMsg] = useState<string | null>(null);
+  const [search, setSearch] = useState({ q: "", classGroupId: "", projectId: "" });
+  const [results, setResults] = useState<any[]>([]);
+  const [editing, setEditing] = useState<any | null>(null);
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -182,6 +185,148 @@ export default function AdminSettings() {
             Alles zurücksetzen
           </button>
         </div>
+      </section>
+
+      <section>
+        <h2 className="text-xl font-semibold mb-2">Einträge suchen & bearbeiten</h2>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <input className="border rounded p-2" placeholder="Name (Teil)" value={search.q} onChange={(e) => setSearch((s) => ({ ...s, q: e.target.value }))} />
+          <select className="border rounded p-2" value={search.classGroupId} onChange={(e) => setSearch((s) => ({ ...s, classGroupId: e.target.value }))}>
+            <option value="">Alle Klassen</option>
+            {classes.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          <select className="border rounded p-2" value={search.projectId} onChange={(e) => setSearch((s) => ({ ...s, projectId: e.target.value }))}>
+            <option value="">Alle Projekte</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="mt-2 flex gap-2">
+          <button
+            className="px-3 py-2 border rounded"
+            onClick={async () => {
+              const params = new URLSearchParams();
+              if (search.q) params.set("q", search.q);
+              if (search.classGroupId) params.set("classGroupId", search.classGroupId);
+              if (search.projectId) params.set("projectId", search.projectId);
+              const res = await fetch(`/api/students?${params.toString()}`);
+              if (res.ok) setResults(await res.json());
+            }}
+          >
+            Suchen
+          </button>
+          <button className="px-3 py-2 border rounded" onClick={() => { setSearch({ q: "", classGroupId: "", projectId: "" }); setResults([]); }}>Zurücksetzen</button>
+        </div>
+        {results.length > 0 && (
+          <div className="mt-3 overflow-auto">
+            <table className="w-full text-sm border">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="text-left p-2 border">Name</th>
+                  <th className="text-left p-2 border">Klasse</th>
+                  <th className="text-left p-2 border">Zuteilung</th>
+                  <th className="text-left p-2 border">Aktion</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((s) => (
+                  <tr key={s.id} className="border-t">
+                    <td className="p-2">{s.firstName} {s.lastName}</td>
+                    <td className="p-2">{s.classGroup?.name}</td>
+                    <td className="p-2">{s.assignedProject ? s.assignedProject.name : "–"}</td>
+                    <td className="p-2"><button className="underline" onClick={() => setEditing(s)}>Bearbeiten</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {editing && (
+          <div className="mt-4 p-4 border rounded">
+            <h3 className="font-semibold mb-2">Eintrag bearbeiten</h3>
+            <div className="grid gap-2 sm:grid-cols-3">
+              <input className="border rounded p-2" value={editing.firstName} onChange={(e) => setEditing((prev: any) => ({ ...prev, firstName: e.target.value }))} />
+              <input className="border rounded p-2" value={editing.lastName} onChange={(e) => setEditing((prev: any) => ({ ...prev, lastName: e.target.value }))} />
+              <select className="border rounded p-2" value={editing.classGroupId} onChange={(e) => setEditing((prev: any) => ({ ...prev, classGroupId: Number(e.target.value) }))}>
+                {classes.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            {settings?.selectionModel === "DIRECT" ? (
+              <div className="mt-3">
+                <label className="block text-sm mb-1">Zugeordnetes Projekt (optional)</label>
+                <select className="border rounded p-2" value={editing.assignedProjectId ?? ""} onChange={(e) => setEditing((prev: any) => ({ ...prev, assignedProjectId: e.target.value ? Number(e.target.value) : null }))}>
+                  <option value="">– keine –</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                {[1,2,3].map((rank) => (
+                  <div key={rank}>
+                    <label className="block text-sm mb-1">{rank}. Wahl</label>
+                    <select
+                      className="border rounded p-2 w-full"
+                      value={editing.selections?.find((s: any) => s.rank === rank)?.projectId ?? ""}
+                      onChange={(e) => {
+                        const pid = e.target.value ? Number(e.target.value) : null;
+                        setEditing((prev: any) => {
+                          const others = (prev.selections || []).filter((s: any) => s.rank !== rank);
+                          return pid ? { ...prev, selections: [...others, { rank, projectId: pid }] } : { ...prev, selections: others };
+                        });
+                      }}
+                    >
+                      <option value="">– keine –</option>
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="mt-3 flex gap-2">
+              <button
+                className="px-3 py-2 bg-blue-600 text-white rounded"
+                onClick={async () => {
+                  const payload: any = {
+                    studentId: editing.id,
+                    firstName: editing.firstName,
+                    lastName: editing.lastName,
+                    classGroupId: editing.classGroupId,
+                  };
+                  if (settings?.selectionModel === "DIRECT") {
+                    payload.assignedProjectId = editing.assignedProjectId ?? null;
+                  } else {
+                    const choices = (editing.selections || [])
+                      .filter((s: any) => s.projectId)
+                      .map((s: any) => ({ projectId: s.projectId, rank: s.rank }))
+                      .sort((a: any, b: any) => a.rank - b.rank);
+                    if (choices.length > 0) payload.choices = choices;
+                  }
+                  const res = await fetch("/api/students", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                  });
+                  if (res.ok) {
+                    setMsg("Eintrag gespeichert");
+                    setEditing(null);
+                  }
+                }}
+              >
+                Speichern
+              </button>
+              <button className="px-3 py-2 border rounded" onClick={() => setEditing(null)}>Abbrechen</button>
+            </div>
+          </div>
+        )}
       </section>
 
       <section>
