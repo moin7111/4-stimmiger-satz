@@ -41,6 +41,11 @@ export default function Select() {
     p.allowedClasses.length === 0 || (studentClassId !== null && p.allowedClasses.some((ac) => ac.classGroupId === studentClassId)),
   );
 
+  const projectById = new Map(visibleProjects.map((p) => [p.id, p] as const));
+
+  const truncate = (text: string, max: number) => (text.length > max ? text.slice(0, max - 1) + "…" : text);
+  const optionLabel = (p: Project) => `${p.name} – ${p.leader}${p.description ? ` — ${truncate(p.description, 70)}` : ""}`;
+
   const rankedSubmit = async () => {
     setError(null);
     const choices = [choice1, choice2, choice3]
@@ -87,58 +92,94 @@ export default function Select() {
   const notYetOpen = startGateActive ? new Date() < startGateActive : false;
 
   return (
-    <div className="max-w-3xl mx-auto p-6">
+    <div className="max-w-3xl mx-auto p-6 text-white">
       <h1 className="text-2xl font-bold mb-4">Projektauswahl</h1>
       {notYetOpen ? (
-        <div className="p-4 border rounded bg-yellow-50 text-yellow-800">
+        <div className="p-4 border rounded bg-yellow-900/30 border-yellow-700 text-yellow-200">
           Die Projektauswahl ist noch nicht freigeschaltet.
           {startGateActive && (
             <div className="text-sm mt-1">Start: {new Date(startGateActive).toLocaleString()}</div>
           )}
         </div>
       ) : settings.selectionModel === "RANKED" ? (
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium">Erstwunsch</label>
-            <select className="w-full border rounded p-2" value={choice1} onChange={(e) => setChoice1(Number(e.target.value))}>
+        <div className="space-y-6">
+          <div className="p-4 rounded border border-gray-700 bg-gray-900/40">
+            <label className="block text-sm font-medium mb-2">Erstwunsch</label>
+            <select
+              className="w-full border border-gray-700 rounded p-2 bg-gray-800 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={choice1}
+              onChange={(e) => setChoice1(Number(e.target.value))}
+            >
               <option value="">Bitte wählen</option>
               {visibleProjects.map((p) => (
-                <option key={p.id} value={p.id}>{p.name} – {p.leader}</option>
+                <option key={p.id} value={p.id}>{optionLabel(p)}</option>
               ))}
             </select>
+            {choice1 !== "" && (
+              <div className="mt-2 text-sm text-gray-300">
+                {(projectById.get(Number(choice1))?.description || "Keine Beschreibung vorhanden.")}
+              </div>
+            )}
           </div>
-          <div>
-            <label className="block text-sm font-medium">Zweitwunsch</label>
-            <select className="w-full border rounded p-2" value={choice2} onChange={(e) => setChoice2(Number(e.target.value))}>
+          <div className="p-4 rounded border border-gray-700 bg-gray-900/40">
+            <label className="block text-sm font-medium mb-2">Zweitwunsch</label>
+            <select
+              className="w-full border border-gray-700 rounded p-2 bg-gray-800 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={choice2}
+              onChange={(e) => setChoice2(Number(e.target.value))}
+            >
               <option value="">Bitte wählen</option>
               {visibleProjects.map((p) => (
-                <option key={p.id} value={p.id}>{p.name} – {p.leader}</option>
+                <option key={p.id} value={p.id}>{optionLabel(p)}</option>
               ))}
             </select>
+            {choice2 !== "" && (
+              <div className="mt-2 text-sm text-gray-300">
+                {(projectById.get(Number(choice2))?.description || "Keine Beschreibung vorhanden.")}
+              </div>
+            )}
           </div>
-          <div>
-            <label className="block text-sm font-medium">Drittwunsch</label>
-            <select className="w-full border rounded p-2" value={choice3} onChange={(e) => setChoice3(Number(e.target.value))}>
+          <div className="p-4 rounded border border-gray-700 bg-gray-900/40">
+            <label className="block text-sm font-medium mb-2">Drittwunsch</label>
+            <select
+              className="w-full border border-gray-700 rounded p-2 bg-gray-800 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={choice3}
+              onChange={(e) => setChoice3(Number(e.target.value))}
+            >
               <option value="">Bitte wählen</option>
               {visibleProjects.map((p) => (
-                <option key={p.id} value={p.id}>{p.name} – {p.leader}</option>
+                <option key={p.id} value={p.id}>{optionLabel(p)}</option>
               ))}
             </select>
+            {choice3 !== "" && (
+              <div className="mt-2 text-sm text-gray-300">
+                {(projectById.get(Number(choice3))?.description || "Keine Beschreibung vorhanden.")}
+              </div>
+            )}
           </div>
           {error && <p className="text-red-600 text-sm">{error}</p>}
           {message && <p className="text-green-700 text-sm">{message}</p>}
           <button onClick={rankedSubmit} className="px-4 py-2 bg-blue-600 text-white rounded">Speichern</button>
         </div>
       ) : (
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium">Projekt</label>
-            <select className="w-full border rounded p-2" value={directChoice} onChange={(e) => setDirectChoice(Number(e.target.value))}>
+        <div className="space-y-6">
+          <div className="p-4 rounded border border-gray-700 bg-gray-900/40">
+            <label className="block text-sm font-medium mb-2">Projekt</label>
+            <select
+              className="w-full border border-gray-700 rounded p-2 bg-gray-800 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={directChoice}
+              onChange={(e) => setDirectChoice(Number(e.target.value))}
+            >
               <option value="">Bitte wählen</option>
               {visibleProjects.map((p) => (
-                <option key={p.id} value={p.id}>{p.name} – {p.leader}</option>
+                <option key={p.id} value={p.id}>{optionLabel(p)}</option>
               ))}
             </select>
+            {directChoice !== "" && (
+              <div className="mt-2 text-sm text-gray-300">
+                {(projectById.get(Number(directChoice))?.description || "Keine Beschreibung vorhanden.")}
+              </div>
+            )}
           </div>
           {error && <p className="text-red-600 text-sm">{error}</p>}
           {message && <p className="text-green-700 text-sm">{message}</p>}
