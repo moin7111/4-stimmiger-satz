@@ -28,7 +28,12 @@ export default function Home() {
       body: JSON.stringify({ firstName, lastName, classGroupId }),
     });
     if (!res.ok) {
-      setError("Anmeldung fehlgeschlagen.");
+      try {
+        const body = await res.json();
+        setError(body?.error || "Anmeldung fehlgeschlagen.");
+      } catch {
+        setError("Anmeldung fehlgeschlagen.");
+      }
       return;
     }
     const s = await res.json();

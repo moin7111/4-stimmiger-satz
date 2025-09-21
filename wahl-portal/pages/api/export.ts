@@ -27,7 +27,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       choice2: s.selections.find((x) => x.rank === 2)?.project.name || "",
       choice3: s.selections.find((x) => x.rank === 3)?.project.name || "",
     }));
-    const csv = stringify(rows, { header: true });
+    const csv = "\uFEFF" + stringify(rows, { header: true, delimiter: ";" });
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", "attachment; filename=overall.csv");
     return res.status(200).send(csv);
@@ -43,7 +43,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         lastName: s.lastName,
         class: s.classGroup.name,
       }));
-    const csv = stringify(rows, { header: true });
+    const csv = "\uFEFF" + stringify(rows, { header: true, delimiter: ";" });
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", "attachment; filename=by-project.csv");
     return res.status(200).send(csv);
@@ -65,8 +65,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         choice2: s.selections.find((x) => x.rank === 2)?.project.name || "",
         choice3: s.selections.find((x) => x.rank === 3)?.project.name || "",
       }));
-      const csv = stringify(rows, { header: true });
+      const csv = "\uFEFF" + stringify(rows, { header: true, delimiter: ";" });
       archive.append(csv, { name: `${c.name}.csv` });
+    }
+    await archive.finalize();
+    return;
+  }
+
+  if (type === "by-project-zip") {
+    const projects = await prisma.project.findMany({ include: { studentsAssigned: true } });
+    const students = await prisma.student.findMany({ include: { classGroup: true } });
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", "attachment; filename=projects.zip");
+    const archive = archiver("zip", { zlib: { level: 9 } });
+    archive.pipe(res);
+    for (const p of projects) {
+      const rows = students
+        .filter((s) => s.assignedProjectId === p.id)
+        .map((s) => ({
+          firstName: s.firstName,
+          lastName: s.lastName,
+          class: s.classGroup.name,
+        }));
+      const csv = "\uFEFF" + stringify(rows, { header: true, delimiter: ";" });
+      const safeName = p.name.replace(/[^a-zA-Z0-9-_]+/g, "_");
+      archive.append(csv, { name: `${safeName}.csv` });
     }
     await archive.finalize();
     return;

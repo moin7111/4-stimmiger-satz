@@ -19,6 +19,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!parsed.success) {
       return res.status(400).json({ error: parsed.error.flatten() });
     }
+    // Enforce single signup: prevent duplicate same person in same class
+    const existing = await prisma.student.findFirst({
+      where: {
+        firstName: parsed.data.firstName,
+        lastName: parsed.data.lastName,
+        classGroupId: parsed.data.classGroupId,
+      },
+    });
+    if (existing) {
+      return res.status(409).json({ error: "Es existiert bereits eine Anmeldung mit diesen Daten." });
+    }
     const created = await prisma.student.create({ data: parsed.data });
     return res.status(201).json(created);
   }

@@ -33,3 +33,7 @@ export default function AdminLogin() {
   );
 }
 
+export function getServerSideProps() {
+  return { props: {} };
+}
+

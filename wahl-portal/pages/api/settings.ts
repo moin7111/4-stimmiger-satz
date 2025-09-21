@@ -13,6 +13,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(200).json(settings);
   }
 
+  if (req.method === "DELETE") {
+    const session = await getServerSession(req, res, authOptions);
+    if (!session) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const reset = await prisma.settings.upsert({
+      where: { id: 1 },
+      update: { selectionModel: "DIRECT" },
+      create: { id: 1, selectionModel: "DIRECT" },
+    });
+    return res.status(200).json(reset);
+  }
+
   if (req.method === "PUT") {
     const session = await getServerSession(req, res, authOptions);
     if (!session) {
@@ -29,7 +42,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(200).json(updated);
   }
 
-  res.setHeader("Allow", ["GET", "PUT"]);
+  res.setHeader("Allow", ["GET", "DELETE", "PUT"]);
   return res.status(405).end("Method Not Allowed");
 }
 
