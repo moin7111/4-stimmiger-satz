@@ -7,7 +7,7 @@ import { authOptions } from "@/lib/auth";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === "GET") {
-    const { id, q, classGroupId, projectId } = req.query as { id?: string; q?: string; classGroupId?: string; projectId?: string };
+    const { id, q, classGroupId, projectId, unassigned, take } = req.query as { id?: string; q?: string; classGroupId?: string; projectId?: string; unassigned?: string; take?: string };
     if (id) {
       const student = await prisma.student.findUnique({ where: { id }, include: { classGroup: true, selections: true, assignedProject: true } });
       if (!student) return res.status(404).json({ error: "Not found" });
@@ -33,11 +33,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       ];
     }
 
+    if (unassigned === "true") {
+      where.assignedProjectId = null;
+    }
+
     const students = await prisma.student.findMany({
       where,
       include: { classGroup: true, selections: true, assignedProject: true },
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
-      take: 100,
+      take: take ? Number(take) : 100,
     });
     return res.status(200).json(students);
   }

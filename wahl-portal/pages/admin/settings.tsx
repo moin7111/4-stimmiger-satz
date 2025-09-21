@@ -586,13 +586,31 @@ export default function AdminSettings() {
           <div className="text-sm text-gray-700">Nur für Modus „Erst-/Zweit-/Drittwahl“ (Ranglisten-Modell)</div>
           <button
             onClick={async () => {
-              await fetch("/api/allocate", { method: "POST" });
-              router.push("/admin/allocation");
+              const res = await fetch("/api/allocate", { method: "POST" });
+              if (res.ok) {
+                const data = await res.json();
+                sessionStorage.setItem("allocationSummary", JSON.stringify(data.summary || null));
+                router.push("/admin/allocation");
+              }
             }}
             className="px-4 py-2 bg-emerald-600 text-white rounded"
           >
             Zuteilen (nur Ranglisten-Modell)
           </button>
+          <div className="pt-2">
+            <button
+              onClick={async () => {
+                const confirmed = window.confirm("Testdaten (20 Projekte, 500 Schüler) erzeugen? Bestehende Daten werden überschrieben.");
+                if (!confirmed) return;
+                const res = await fetch("/api/admin/seed-test", { method: "POST" });
+                if (res.ok) setMsg("Testdaten erzeugt");
+                else setMsg("Fehler beim Erzeugen der Testdaten");
+              }}
+              className="px-4 py-2 border rounded"
+            >
+              Testdaten erzeugen (20 Projekte, 500 Schüler)
+            </button>
+          </div>
         </div>
       </section>
     </div>
