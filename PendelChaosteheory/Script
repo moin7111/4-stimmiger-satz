@@ -80,10 +80,19 @@ def xy_to_angle(origin, pt):
     angle = math.atan2(dx, dy)
     return angle
 
-def draw_text_at(text, x, y, font=('Helvetica', 12), number_of_lines=0):
-    # Helper: draw text at (x,y) by measuring its bounding box for ui.draw_string
-    w, h = ui.measure_string(text, font=font, number_of_lines=number_of_lines)
-    ui.draw_string(text, (x, y, w, h), font=font, number_of_lines=number_of_lines)
+def draw_text_at(text, x, y, font=('Helvetica', 12)):
+    # Helper: draw text at (x,y). Pythonista's ui.measure_string/draw_string do not support
+    # number_of_lines in all versions, so we avoid that kwarg and handle simple multi-line text.
+    if '\n' in text:
+        # Render each line underneath the previous one
+        lines = text.split('\n')
+        line_height = ui.measure_string('Ag', font=font)[1]
+        for idx, line in enumerate(lines):
+            w, h = ui.measure_string(line, font=font)
+            ui.draw_string(line, (x, y + idx * line_height, w, h), font=font)
+    else:
+        w, h = ui.measure_string(text, font=font)
+        ui.draw_string(text, (x, y, w, h), font=font)
 
 # ---------- Visual/Simulation View -----------------------------
 
