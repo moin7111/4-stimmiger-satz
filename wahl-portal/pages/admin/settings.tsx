@@ -84,10 +84,31 @@ export default function AdminSettings() {
         <div className="mt-4 flex gap-3">
           <button
             onClick={async () => {
-              const res = await fetch("/api/settings", { method: "DELETE" });
+              const confirmed = window.confirm(
+                [
+                  "Sicher, dass alles gelöscht werden soll?",
+                  "\nDies entfernt unwiderruflich:",
+                  "• alle Klassen",
+                  "• alle Projekte",
+                  "• alle Anmeldungen/Einträge und Ranglisten",
+                  "• alle Zuteilungen",
+                  "\nEinstellungen werden auf Standard (Direktwahl) zurückgesetzt.",
+                ].join("\n")
+              );
+              if (!confirmed) return;
+              const res = await fetch("/api/admin/reset", { method: "POST" });
               if (res.ok) {
-                setSettings(await res.json());
-                setMsg("Einstellungen zurückgesetzt");
+                setSettings({ selectionModel: "DIRECT" });
+                setClasses([]);
+                setProjects([]);
+                setMsg("Alle Daten wurden gelöscht.");
+              } else {
+                try {
+                  const body = await res.json();
+                  setMsg(body?.error ? `Fehler: ${body.error}` : "Fehler beim Zurücksetzen");
+                } catch {
+                  setMsg("Fehler beim Zurücksetzen");
+                }
               }
             }}
             className="px-3 py-2 border rounded"
