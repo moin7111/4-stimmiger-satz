@@ -278,14 +278,19 @@ export default function AdminSettings() {
                         const pid = e.target.value ? Number(e.target.value) : null;
                         setEditing((prev: any) => {
                           const others = (prev.selections || []).filter((s: any) => s.rank !== rank);
+                          if (pid && others.some((s: any) => s.projectId === pid)) {
+                            return prev; // prevent duplicates client-side
+                          }
                           return pid ? { ...prev, selections: [...others, { rank, projectId: pid }] } : { ...prev, selections: others };
                         });
                       }}
                     >
                       <option value="">– keine –</option>
-                      {projects.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
+                      {projects.map((p) => {
+                        const chosenIds = new Set((editing.selections || []).filter((s: any) => s.rank !== rank).map((s: any) => s.projectId));
+                        const disabled = chosenIds.has(p.id);
+                        return <option key={p.id} value={p.id} disabled={disabled}>{p.name}{disabled ? " (bereits gewählt)" : ""}</option>;
+                      })}
                     </select>
                   </div>
                 ))}
@@ -308,6 +313,12 @@ export default function AdminSettings() {
                       .filter((s: any) => s.projectId)
                       .map((s: any) => ({ projectId: s.projectId, rank: s.rank }))
                       .sort((a: any, b: any) => a.rank - b.rank);
+                    // Ensure unique projects client-side
+                    const unique = new Set(choices.map((c: any) => c.projectId));
+                    if (unique.size !== choices.length) {
+                      setMsg("Jedes Projekt darf nur einmal gewählt werden.");
+                      return;
+                    }
                     if (choices.length > 0) payload.choices = choices;
                   }
                   const res = await fetch("/api/students", {
@@ -322,6 +333,22 @@ export default function AdminSettings() {
                 }}
               >
                 Speichern
+              </button>
+              <button
+                className="px-3 py-2 border rounded"
+                onClick={async () => {
+                  if (!editing) return;
+                  const confirmed = window.confirm("Diesen Eintrag wirklich löschen?");
+                  if (!confirmed) return;
+                  const res = await fetch("/api/students", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: editing.id }) });
+                  if (res.status === 204) {
+                    setMsg("Eintrag gelöscht");
+                    setEditing(null);
+                    setResults((prev) => prev.filter((s: any) => s.id !== editing.id));
+                  }
+                }}
+              >
+                Löschen
               </button>
               <button className="px-3 py-2 border rounded" onClick={() => setEditing(null)}>Abbrechen</button>
             </div>

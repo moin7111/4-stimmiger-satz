@@ -33,6 +33,12 @@ export const studentUpdateSchema = z.object({
     )
     .min(1)
     .max(3)
+    .refine((arr) => new Set(arr.map((c) => c.rank)).size === arr.length, {
+      message: "Ranks must be unique",
+    })
+    .refine((arr) => new Set(arr.map((c) => c.projectId)).size === arr.length, {
+      message: "Projects must be unique across choices",
+    })
     .optional(),
 });
 
@@ -51,6 +57,12 @@ export const selectionRankedSchema = z.object({
       }),
     )
     .min(1)
-    .max(3),
+    .max(3)
+    .refine((arr) => new Set(arr.map((c) => c.rank)).size === arr.length, {
+      message: "Ranks must be unique",
+    })
+    .refine((arr) => new Set(arr.map((c) => c.projectId)).size === arr.length, {
+      message: "Projects must be unique across choices",
+    }),
 });
 

@@ -61,6 +61,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(201).json(created);
   }
 
+  if (req.method === "DELETE") {
+    const session = await getServerSession(req, res, authOptions);
+    if (!session) return res.status(401).json({ error: "Unauthorized" });
+    const { id } = req.body as { id?: string };
+    if (!id) return res.status(400).json({ error: "Missing id" });
+    await prisma.studentSelection.deleteMany({ where: { studentId: id } });
+    await prisma.student.delete({ where: { id } });
+    return res.status(204).end();
+  }
+
   if (req.method === "PUT") {
     const session = await getServerSession(req, res, authOptions);
     if (!session) return res.status(401).json({ error: "Unauthorized" });
@@ -97,7 +107,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(200).json(updated);
   }
 
-  res.setHeader("Allow", ["GET", "POST", "PUT"]);
+  res.setHeader("Allow", ["GET", "POST", "PUT", "DELETE"]);
   return res.status(405).end("Method Not Allowed");
 }
 
