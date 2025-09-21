@@ -1,0 +1,501 @@
+# Doppelpendel_Pythonista_Concept.py
+# Pythonista-ready script (iPad) — Konzept + funktionsfähiger Prototyp
+# Ziel: interaktive, "natürliche" Simulation von Pendel und Doppelpendel
+# Features:
+# - Einzel- und Doppelpendel-Modus
+# - RK4-Integrator für stabile Numerik
+# - Touch: Bob ziehen zum Setzen des Startorts
+# - Zeit-Skalierung (Geschwindigkeit erhöhen/verringern)
+# - Spur (Trail) des letzten Schwingpunkts
+# - Laufende Zeit, Stopp bei vordefiniertem Zeitpunkt
+# - Positionen für bestimmte Zeiten berechnen & als Zeitstempel auf die Szene zeichnen
+# - Werte werden mit reduziertem Zahlenformat (4 Dezimalstellen) angezeigt
+#
+# Hinweise zum Ausführen:
+# - In Pythonista öffnen und ausführen.
+# - Die UI ist mit dem ui-Modul aufgebaut; das Zeichenfeld ist links, Controls rechts.
+#
+# ---------------------------------------------------------------
+import ui
+import math
+import time
+import threading
+
+# ---------- Physik: Doppelpendel-DGL (RK4) --------------------
+
+def derivs(state, params):
+    # state = [th1, w1, th2, w2]
+    th1, w1, th2, w2 = state
+    m1 = params['m1']; m2 = params['m2']
+    l1 = params['l1']; l2 = params['l2']
+    g = params['g']
+
+    delta = th2 - th1
+
+    denom1 = (2*m1 + m2 - m2 * math.cos(2*th1 - 2*th2))
+    denom2 = (2*m1 + m2 - m2 * math.cos(2*th1 - 2*th2))
+
+    # avoid division by zero
+    if abs(denom1) < 1e-6: denom1 = 1e-6
+    if abs(denom2) < 1e-6: denom2 = 1e-6
+
+    num1 = -g*(2*m1 + m2)*math.sin(th1)
+    num1 += -m2*g*math.sin(th1 - 2*th2)
+    num1 += -2*math.sin(delta)*m2*(w2*w2*l2 + w1*w1*l1*math.cos(delta))
+    domega1 = num1 / (l1 * denom1)
+
+    num2 = 2*math.sin(delta)*(w1*w1*l1*(m1+m2) + g*(m1+m2)*math.cos(th1) + w2*w2*l2*m2*math.cos(delta))
+    domega2 = num2 / (l2 * denom2)
+
+    return [w1, domega1, w2, domega2]
+
+
+def rk4_step(state, dt, params):
+    # classic RK4
+    s1 = state
+    k1 = derivs(s1, params)
+    s2 = [s1[i] + 0.5*dt*k1[i] for i in range(4)]
+    k2 = derivs(s2, params)
+    s3 = [s1[i] + 0.5*dt*k2[i] for i in range(4)]
+    k3 = derivs(s3, params)
+    s4 = [s1[i] + dt*k3[i] for i in range(4)]
+    k4 = derivs(s4, params)
+    new = [s1[i] + dt*(k1[i] + 2*k2[i] + 2*k3[i] + k4[i])/6.0 for i in range(4)]
+    return new
+
+# Single pendulum special-case: set m2=0 effectively
+
+# ---------- Hilfsfunktionen -----------------------------------
+
+def polar_to_xy(origin, angle, length):
+    x = origin[0] + length * math.sin(angle)
+    y = origin[1] + length * math.cos(angle)
+    return (x, y)
+
+
+def xy_to_angle(origin, pt):
+    dx = pt[0] - origin[0]
+    dy = pt[1] - origin[1]
+    # angle measured from vertical downwards (0 = down)
+    angle = math.atan2(dx, dy)
+    return angle
+
+# ---------- Visual/Simulation View -----------------------------
+
+class PendulumView(ui.View):
+    def __init__(self, model):
+        self.model = model
+        self.background_color = 'white'
+        self.set_needs_display()
+        # for dragging
+        self.dragging = None
+        # prepare double-buffer-like trail storage
+        self.trail = []  # list of (x,y)
+        # stamps: list of dicts with x,y,text
+        self.stamps = []
+
+    def draw(self):
+        # drawing callback
+        r = self.bounds
+        cx = r.w * 0.5
+        cy = r.h * 0.15  # pivot near top
+        origin = (cx, cy)
+
+        # background
+        ui.set_color((0.98,0.98,0.98))
+        ui.Path.rect(0,0,r.w,r.h).fill()
+
+        # compute bob positions from model state
+        th1, w1, th2, w2 = self.model.state
+        l1 = self.model.params['l1'] * self.model.pixels_per_meter
+        l2 = self.model.params['l2'] * self.model.pixels_per_meter
+
+        x1, y1 = polar_to_xy(origin, th1, l1)
+        x2, y2 = polar_to_xy((x1,y1), th2, l2)
+
+        # draw trails (for second bob)
+        if self.trail:
+            path = ui.Path()
+            path.move_to(self.trail[0][0], self.trail[0][1])
+            for (tx,ty) in self.trail[1:]:
+                path.line_to(tx,ty)
+            # stroke with fading alpha by drawing many segments? simple: constant alpha
+            ui.set_color((0,0,0,0.15))
+            path.stroke()
+
+        # rods
+        ui.set_color('black')
+        p = ui.Path()
+        p.move_to(origin[0], origin[1])
+        p.line_to(x1, y1)
+        p.stroke()
+        p2 = ui.Path()
+        p2.move_to(x1, y1)
+        p2.line_to(x2, y2)
+        p2.stroke()
+
+        # bobs
+        r1 = 14
+        r2 = 12
+        ui.set_color('gray')
+        ui.Path.oval(x1-r1, y1-r1, r1*2, r1*2).fill()
+        ui.set_color('darkred')
+        ui.Path.oval(x2-r2, y2-r2, r2*2, r2*2).fill()
+
+        # show pivot
+        ui.set_color('black')
+        ui.Path.oval(origin[0]-4, origin[1]-4, 8, 8).fill()
+
+        # draw stamps
+        ui.set_color('blue')
+        for s in self.stamps:
+            ui.Path.oval(s['x']-5, s['y']-5, 10, 10).fill()
+            ui.draw_string(s['text'], (s['x']+8, s['y']-8), font=('Helvetica', 12))
+
+        # overlay time
+        ui.set_color('black')
+        tlabel = 't = {:.3f} s'.format(self.model.sim_time)
+        ui.draw_string(tlabel, (8, r.h - 28), font=('Helvetica', 16))
+
+    # Touch handling: allow dragging of first or second bob to set start angles
+    def touch_began(self, touch):
+        r = self.bounds
+        cx = r.w * 0.5
+        cy = r.h * 0.15
+        origin = (cx, cy)
+        th1, w1, th2, w2 = self.model.state
+        l1 = self.model.params['l1'] * self.model.pixels_per_meter
+        l2 = self.model.params['l2'] * self.model.pixels_per_meter
+        x1, y1 = polar_to_xy(origin, th1, l1)
+        x2, y2 = polar_to_xy((x1,y1), th2, l2)
+
+        tx, ty = touch.location
+        if (tx-x2)**2 + (ty-y2)**2 < 20*20:
+            self.dragging = 'bob2'
+        elif (tx-x1)**2 + (ty-y1)**2 < 20*20:
+            self.dragging = 'bob1'
+        else:
+            self.dragging = None
+
+    def touch_moved(self, touch):
+        if not self.dragging:
+            return
+        r = self.bounds
+        cx = r.w * 0.5
+        cy = r.h * 0.15
+        origin = (cx, cy)
+        tx, ty = touch.location
+
+        if self.dragging == 'bob1':
+            # set th1 from origin->touch
+            th1 = xy_to_angle(origin, (tx,ty))
+            # update state angles, zero velocities
+            self.model.state[0] = th1
+            self.model.state[1] = 0.0
+            # also update second bob position to keep geometry (keep current th2)
+            self.set_needs_display()
+        elif self.dragging == 'bob2':
+            # compute angle of second relative to first bob's position
+            th1 = self.model.state[0]
+            l1 = self.model.params['l1'] * self.model.pixels_per_meter
+            x1, y1 = polar_to_xy(origin, th1, l1)
+            th2 = xy_to_angle((x1,y1), (tx,ty))
+            self.model.state[2] = th2
+            self.model.state[3] = 0.0
+            self.set_needs_display()
+
+    def touch_ended(self, touch):
+        self.dragging = None
+
+# ---------- Model (zustand + simulation-loop) ------------------
+
+class PendulumModel(object):
+    def __init__(self):
+        # physical parameters (SI units)
+        self.params = {
+            'm1': 1.0,
+            'm2': 1.0,
+            'l1': 1.0,   # meters
+            'l2': 1.0,
+            'g': 9.81
+        }
+        # initial state: theta measured from vertical (downwards)
+        self.state = [math.radians(120), 0.0, math.radians(-10), 0.0]
+        self.sim_time = 0.0
+        self.running = False
+        self.time_scale = 1.0  # speed multiplier
+        self.dt = 0.01  # base timestep for integrator
+        self.pixels_per_meter = 180.0  # scaling for drawing
+        self.trail_max = 400
+        self.trail = []
+        self.stop_at = None  # if set, simulation will stop at this sim_time
+
+    def step(self, dt):
+        # advance by dt (already includes time_scale externally)
+        self.state = rk4_step(self.state, dt, self.params)
+        self.sim_time += dt
+
+    def reset(self):
+        self.state = [math.radians(120), 0.0, math.radians(-10), 0.0]
+        self.sim_time = 0.0
+        self.trail = []
+        self.stop_at = None
+
+    def single_step_silent(self, t):
+        # compute state at time t from initial state (used for stamping positions at specific times)
+        # integrate from t0=0 to t in a local copy so we don't disturb running sim
+        s = [math.radians(120), 0.0, math.radians(-10), 0.0]
+        params = self.params.copy()
+        dt = 0.005
+        steps = max(1, int(abs(t) / dt))
+        dt = t / steps
+        for i in range(steps):
+            s = rk4_step(s, dt, params)
+        return s
+
+# ---------- Controller / App ----------------------------------
+
+class PendulumApp(object):
+    def __init__(self):
+        self.model = PendulumModel()
+        self.view = ui.View()
+        self.view.name = 'Doppelpendel — Demo'
+        self.view.background_color = 'white'
+        self.setup_layout()
+        self.running = False
+        # periodic timer
+        self.timer = None
+
+    def setup_layout(self):
+        # left: drawing view
+        self.draw_view = PendulumView(self.model)
+        self.draw_view.frame = (0, 0, 700, 700)
+        self.draw_view.flex = 'WH'
+        self.view.add_subview(self.draw_view)
+
+        # right: controls
+        w = 300
+        ctrl = ui.View(frame=(700,0,w,700))
+        ctrl.flex = 'LH'
+        ctrl.background_color = (0.96,0.96,0.96)
+
+        y = 12
+        def add_label(text):
+            nonlocal y
+            lbl = ui.Label(frame=(10,y, w-20, 26))
+            lbl.text = text
+            lbl.font = ('<System>', 14)
+            ctrl.add_subview(lbl)
+            y += 30
+            return lbl
+
+        add_label('Controls')
+
+        # Start/Pause Button
+        self.btn_run = ui.Button(frame=(10,y, w-20, 40))
+        self.btn_run.title = 'Start'
+        self.btn_run.action = self.toggle_run
+        ctrl.add_subview(self.btn_run)
+        y += 48
+
+        # Reset
+        btn_reset = ui.Button(frame=(10,y, w-20, 34))
+        btn_reset.title = 'Reset'
+        btn_reset.action = lambda sender: self.reset()
+        ctrl.add_subview(btn_reset)
+        y += 42
+
+        # Mode (single/double)
+        self.mode_seg = ui.SegmentedControl(frame=(10,y, w-20, 34))
+        self.mode_seg.segments = ['Double','Single']
+        self.mode_seg.selected_index = 0
+        self.mode_seg.action = self.change_mode
+        ctrl.add_subview(self.mode_seg)
+        y += 42
+
+        # Speed slider
+        add_label('Zeit-Skalierung (Speed)')
+        self.speed_slider = ui.Slider(frame=(10,y, w-20, 34))
+        self.speed_slider.value = 1.0
+        self.speed_slider.action = self.update_speed
+        ctrl.add_subview(self.speed_slider)
+        y += 42
+
+        # Trail length
+        add_label('Spur-Länge')
+        self.trail_slider = ui.Slider(frame=(10,y, w-20, 34))
+        self.trail_slider.value = 400
+        self.trail_slider.minimum_value = 10
+        self.trail_slider.maximum_value = 1200
+        self.trail_slider.action = self.update_trail
+        ctrl.add_subview(self.trail_slider)
+        y += 42
+
+        # Stop at time
+        add_label('Automatisch stoppen bei t (s)')
+        self.stop_field = ui.TextField(frame=(10,y, w-120, 34))
+        self.stop_field.placeholder = 'z.B. 12.5'
+        ctrl.add_subview(self.stop_field)
+        btn_setstop = ui.Button(frame=(w-100,y,90,34))
+        btn_setstop.title = 'Set Stop'
+        btn_setstop.action = self.set_stop_time
+        ctrl.add_subview(btn_setstop)
+        y += 42
+
+        # Compute pos at time
+        add_label('Position berechnen bei t (s)')
+        self.compute_field = ui.TextField(frame=(10,y, w-120, 34))
+        self.compute_field.placeholder = 'z.B. 3.14'
+        ctrl.add_subview(self.compute_field)
+        btn_comp = ui.Button(frame=(w-100,y,90,34))
+        btn_comp.title = 'Compute'
+        btn_comp.action = self.compute_and_stamp
+        ctrl.add_subview(btn_comp)
+        y += 42
+
+        # Stamps list (short)
+        add_label('Stamps (letzte)')
+        self.stamps_label = ui.TextView(frame=(10,y, w-20, 140))
+        self.stamps_label.editable = False
+        ctrl.add_subview(self.stamps_label)
+        y += 148
+
+        self.view.add_subview(ctrl)
+
+    # Control callbacks
+    def toggle_run(self, sender):
+        if self.model.running:
+            self.pause()
+        else:
+            self.start()
+
+    def start(self):
+        if self.model.running:
+            return
+        self.model.running = True
+        self.btn_run.title = 'Pause'
+        self._start_timer()
+
+    def pause(self):
+        self.model.running = False
+        self.btn_run.title = 'Start'
+        self._stop_timer()
+
+    def reset(self):
+        self.model.reset()
+        self.draw_view.trail = []
+        self.draw_view.stamps = []
+        self.stamps_label.text = ''
+        self.draw_view.set_needs_display()
+
+    def change_mode(self, sender):
+        if sender.selected_index == 1:
+            # single pendulum -> set m2=0 to reduce to single pendulum
+            self.model.params['m2'] = 0.0
+        else:
+            self.model.params['m2'] = 1.0
+
+    def update_speed(self, sender):
+        self.model.time_scale = max(0.01, sender.value)
+
+    def update_trail(self, sender):
+        self.model.trail_max = int(sender.value)
+
+    def set_stop_time(self, sender):
+        try:
+            v = float(self.stop_field.text)
+            if v <= 0:
+                self.model.stop_at = None
+            else:
+                self.model.stop_at = v
+        except Exception:
+            self.model.stop_at = None
+
+    def compute_and_stamp(self, sender):
+        # compute state at given time (from initial state) and stamp on the scene
+        try:
+            t = float(self.compute_field.text)
+        except Exception:
+            return
+        s = self.model.single_step_silent(t)
+        # convert to pixel coordinates
+        r = self.draw_view.bounds
+        cx = r.w * 0.5
+        cy = r.h * 0.15
+        origin = (cx, cy)
+        l1 = self.model.params['l1'] * self.model.pixels_per_meter
+        l2 = self.model.params['l2'] * self.model.pixels_per_meter
+        x1, y1 = polar_to_xy(origin, s[0], l1)
+        x2, y2 = polar_to_xy((x1,y1), s[2], l2)
+        text = 't={:.3f}s\n({:.4f},{:.4f})'.format(t, x2/self.model.pixels_per_meter, y2/self.model.pixels_per_meter)
+        # add stamp
+        stamp = {'x': x2, 'y': y2, 'text': text}
+        self.draw_view.stamps.append(stamp)
+        # update textual stamps
+        prev = self.stamps_label.text
+        entry = 't={:.3f}s -> x={:.4f} m, y={:.4f} m\n'.format(t, x2/self.model.pixels_per_meter, y2/self.model.pixels_per_meter)
+        self.stamps_label.text = entry + prev
+        self.draw_view.set_needs_display()
+
+    # Timer management
+    def _start_timer(self):
+        # run update loop in background thread to not block UI
+        if self.timer:
+            return
+        self._timer_stop = False
+        def loop():
+            last = time.time()
+            while self.model.running and not self._timer_stop:
+                now = time.time()
+                real_dt = now - last
+                last = now
+                # scaled dt
+                dt = real_dt * self.model.time_scale
+                # clamp dt so integrator remains stable
+                steps = max(1, int(dt / self.model.dt))
+                small_dt = dt / steps
+                for i in range(steps):
+                    self.model.step(small_dt)
+                # update trail with second bob position
+                r = self.draw_view.bounds
+                cx = r.w * 0.5
+                cy = r.h * 0.15
+                origin = (cx, cy)
+                l1 = self.model.params['l1'] * self.model.pixels_per_meter
+                l2 = self.model.params['l2'] * self.model.pixels_per_meter
+                x1, y1 = polar_to_xy(origin, self.model.state[0], l1)
+                x2, y2 = polar_to_xy((x1,y1), self.model.state[2], l2)
+                self.draw_view.trail.append((x2,y2))
+                if len(self.draw_view.trail) > self.model.trail_max:
+                    self.draw_view.trail.pop(0)
+                # copy trail to view for drawing
+                self.draw_view.trail = list(self.draw_view.trail)
+
+                # check stop condition
+                if self.model.stop_at is not None and self.model.sim_time >= self.model.stop_at:
+                    # automatically pause
+                    self.pause()
+                    break
+
+                # request redraw on main thread
+                ui.delay(self.draw_view.set_needs_display, 0)
+                # sleep a small amount
+                time.sleep(0.016)  # ~60 Hz
+        t = threading.Thread(target=loop)
+        t.daemon = True
+        t.start()
+        self.timer = t
+
+    def _stop_timer(self):
+        self._timer_stop = True
+        self.timer = None
+
+    def present(self):
+        # present the assembled UI
+        self.view.present('sheet')
+
+
+# Run the app
+if __name__ == '__main__':
+    app = PendulumApp()
+    app.present()
