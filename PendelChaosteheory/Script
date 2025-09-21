@@ -506,7 +506,7 @@ class PendulumApp(object):
 
     def present(self):
         # present the assembled UI
-        self.view.present('sheet')
+        self.view.present('fullscreen', hide_title_bar=True)
 
 
 # Run the app
