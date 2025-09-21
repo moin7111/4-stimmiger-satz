@@ -59,7 +59,7 @@ export default function Select() {
       setError("Speichern fehlgeschlagen.");
       return;
     }
-    setMessage("Deine Wahlen wurden gespeichert.");
+    router.push("/thanks");
   };
 
   const directSubmit = async () => {
@@ -78,7 +78,7 @@ export default function Select() {
       setError(body?.error || "Speichern fehlgeschlagen.");
       return;
     }
-    setMessage("Deine Auswahl wurde gespeichert.");
+    router.push("/thanks");
   };
 
   if (!settings) return null;
