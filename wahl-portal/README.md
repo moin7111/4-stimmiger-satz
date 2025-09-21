@@ -1,40 +1,57 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/pages/api-reference/create-next-app).
+Wahl-Portal
+===========
 
-## Getting Started
+Funktionen
+----------
+- Anmeldung: Vorname, Nachname, Klasse wählen
+- Auswahl: Direktwahl oder Erst-/Zweit-/Drittwahl (umschaltbar im Admin)
+- Admin: Login mit Passwort, Einstellungen, Klassen und Projekte verwalten
+- Zuteilung: Einfaches Losverfahren nach Priorität (1 vor 2 vor 3)
+- Export: CSV gesamt, CSV nach Projekten, ZIP pro Klasse
 
-First, run the development server:
+Tech Stack
+----------
+- Next.js (Pages Router, TypeScript, Tailwind)
+- Prisma + SQLite (lokal)
+- NextAuth Credentials (Passwort-Login für Admin)
 
-```bash
+Entwicklung
+-----------
+1. Env anlegen (.env)
+```
+DATABASE_URL="file:./dev.db"
+NEXTAUTH_SECRET="change-me-in-prod"
+NEXTAUTH_URL="http://localhost:3000"
+ADMIN_PASSWORD="admin-change-me"
+```
+2. Prisma migrieren und starten
+```
+npm run prisma:migrate
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Seiten
+------
+- /: Schüler-Anmeldung (Vorname, Nachname, Klasse)
+- /select?studentId=…: Projektauswahl je nach Modell
+- /admin/login: Admin Login
+- /admin/settings: Einstellungen, Klassen/Projekte, Export, Zuteilung
 
-You can start editing the page by modifying `pages/index.tsx`. The page auto-updates as you edit the file.
+Render Deployment (GitHub Auto-Deploy)
+--------------------------------------
+1. Repository nach GitHub pushen
+2. Render Web Service erstellen (Node 18+)
+3. Build Command: `npm run build`
+4. Start Command: `npm start`
+5. Environment Vars setzen:
+   - `DATABASE_URL` (z. B. `file:./dev.db` für SQLite oder eine externe DB)
+   - `NEXTAUTH_SECRET` (lange zufällige Zeichenkette)
+   - `NEXTAUTH_URL` (Produktions-URL)
+   - `ADMIN_PASSWORD` (Admin-Passwort)
+6. (Optional) Prisma bei Erststart migrieren: `npx prisma migrate deploy`
 
-[API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) can be accessed on [http://localhost:3000/api/hello](http://localhost:3000/api/hello). This endpoint can be edited in `pages/api/hello.ts`.
-
-The `pages/api` directory is mapped to `/api/*`. Files in this directory are treated as [API routes](https://nextjs.org/docs/pages/building-your-application/routing/api-routes) instead of React pages.
-
-This project uses [`next/font`](https://nextjs.org/docs/pages/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn-pages-router) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/pages/building-your-application/deploying) for more details.
+Hinweise
+--------
+- Für echte Produktion empfiehlt sich Postgres statt SQLite.
+- Bei Direktwahl wird Kapazität pro Projekt sofort geprüft.
+- Bei Ranglistenwahl werden Wahlen gespeichert und via Admin „Zuteilen“ verteilt.
