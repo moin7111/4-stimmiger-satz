@@ -15,6 +15,8 @@ export default function AdminSettings() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [newClassName, setNewClassName] = useState("");
   const [projectForm, setProjectForm] = useState({ name: "", leader: "", description: "", capacity: 20, allowedClassIds: [] as number[] });
+  const [projectEditingId, setProjectEditingId] = useState<number | null>(null);
+  const [projectEditForm, setProjectEditForm] = useState({ name: "", leader: "", description: "", capacity: 20, allowedClassIds: [] as number[] });
   const [msg, setMsg] = useState<string | null>(null);
   const [search, setSearch] = useState({ q: "", classGroupId: "", projectId: "" });
   type StudentSummary = {
@@ -84,6 +86,61 @@ export default function AdminSettings() {
       const p = await res.json();
       setProjects((prev) => [...prev, p]);
       setProjectForm({ name: "", leader: "", description: "", capacity: 20, allowedClassIds: [] });
+    }
+  };
+
+  const startEditProject = (p: Project) => {
+    setProjectEditingId(p.id);
+    setProjectEditForm({
+      name: p.name,
+      leader: p.leader,
+      description: p.description || "",
+      capacity: p.capacity,
+      allowedClassIds: p.allowedClasses.map((ac) => ac.classGroupId),
+    });
+  };
+
+  const saveProjectEdit = async () => {
+    if (!projectEditingId) return;
+    const res = await fetch("/api/projects", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: projectEditingId, ...projectEditForm }),
+    });
+    if (res.ok) {
+      const updated = await res.json();
+      setProjects((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+      setProjectEditingId(null);
+      setProjectEditForm({ name: "", leader: "", description: "", capacity: 20, allowedClassIds: [] });
+      setMsg("Projekt gespeichert");
+    } else {
+      try {
+        const body = await res.json();
+        setMsg(body?.error ? `Fehler: ${JSON.stringify(body.error)}` : "Fehler beim Speichern");
+      } catch {
+        setMsg("Fehler beim Speichern");
+      }
+    }
+  };
+
+  const deleteProject = async (id: number) => {
+    const confirmed = window.confirm("Dieses Projekt wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.");
+    if (!confirmed) return;
+    const res = await fetch("/api/projects", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+    if (res.status === 204) {
+      setProjects((prev) => prev.filter((p) => p.id !== id));
+      if (projectEditingId === id) {
+        setProjectEditingId(null);
+        setProjectEditForm({ name: "", leader: "", description: "", capacity: 20, allowedClassIds: [] });
+      }
+      setMsg("Projekt gelöscht");
+    } else {
+      try {
+        const body = await res.json();
+        setMsg(body?.error ? `Fehler: ${JSON.stringify(body.error)}` : "Fehler beim Löschen");
+      } catch {
+        setMsg("Fehler beim Löschen");
+      }
     }
   };
 
@@ -234,7 +291,7 @@ export default function AdminSettings() {
         {results.length > 0 && (
           <div className="mt-3 overflow-auto">
             <table className="w-full text-sm border">
-              <thead className="bg-gray-50">
+              <thead className="bg-gray-50 text-black">
                 <tr>
                   <th className="text-left p-2 border">Name</th>
                   <th className="text-left p-2 border">Klasse</th>
@@ -428,10 +485,85 @@ export default function AdminSettings() {
             <ul className="space-y-2">
               {projects.map((p) => (
                 <li key={p.id} className="border rounded p-3">
-                  <div className="font-medium">{p.name}</div>
-                  <div className="text-sm text-gray-600">{p.leader}</div>
-                  <div className="text-sm">Kapazität: {p.capacity}</div>
-                  <div className="text-xs text-gray-600">Klassen: {p.allowedClasses.map((ac) => ac.classGroup.name).join(", ") || "alle"}</div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="font-medium">{p.name}</div>
+                      <div className="text-sm text-gray-600">{p.leader}</div>
+                      <div className="text-sm">Kapazität: {p.capacity}</div>
+                      <div className="text-xs text-gray-600">Klassen: {p.allowedClasses.map((ac) => ac.classGroup.name).join(", ") || "alle"}</div>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                      <button className="text-sm underline" onClick={() => startEditProject(p)}>Bearbeiten</button>
+                      <button className="text-sm underline" onClick={() => deleteProject(p.id)}>Löschen</button>
+                    </div>
+                  </div>
+                  {projectEditingId === p.id && (
+                    <div className="mt-3 space-y-2">
+                      <input
+                        className="w-full border rounded p-2"
+                        placeholder="Name"
+                        value={projectEditForm.name}
+                        onChange={(e) => setProjectEditForm((f) => ({ ...f, name: e.target.value }))}
+                      />
+                      <input
+                        className="w-full border rounded p-2"
+                        placeholder="Leitung"
+                        value={projectEditForm.leader}
+                        onChange={(e) => setProjectEditForm((f) => ({ ...f, leader: e.target.value }))}
+                      />
+                      <textarea
+                        className="w-full border rounded p-2"
+                        placeholder="Beschreibung (optional)"
+                        value={projectEditForm.description}
+                        onChange={(e) => setProjectEditForm((f) => ({ ...f, description: e.target.value }))}
+                      />
+                      <input
+                        className="w-full border rounded p-2"
+                        type="number"
+                        min={1}
+                        placeholder="Teilnehmerzahl"
+                        value={projectEditForm.capacity}
+                        onChange={(e) => setProjectEditForm((f) => ({ ...f, capacity: Number(e.target.value) }))}
+                      />
+                      <div>
+                        <div className="text-sm font-medium mb-1">Erlaubte Klassen</div>
+                        <div className="flex flex-wrap gap-2">
+                          {classes.map((c) => {
+                            const checked = projectEditForm.allowedClassIds.includes(c.id);
+                            return (
+                              <label key={c.id} className="inline-flex items-center gap-1 text-sm border rounded px-2 py-1">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={(e) =>
+                                    setProjectEditForm((f) => ({
+                                      ...f,
+                                      allowedClassIds: e.target.checked
+                                        ? [...f.allowedClassIds, c.id]
+                                        : f.allowedClassIds.filter((x) => x !== c.id),
+                                    }))
+                                  }
+                                />
+                                {c.name}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button className="px-3 py-2 bg-blue-600 text-white rounded" onClick={saveProjectEdit}>Speichern</button>
+                        <button
+                          className="px-3 py-2 border rounded"
+                          onClick={() => {
+                            setProjectEditingId(null);
+                            setProjectEditForm({ name: "", leader: "", description: "", capacity: 20, allowedClassIds: [] });
+                          }}
+                        >
+                          Abbrechen
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
@@ -454,13 +586,31 @@ export default function AdminSettings() {
           <div className="text-sm text-gray-700">Nur für Modus „Erst-/Zweit-/Drittwahl“ (Ranglisten-Modell)</div>
           <button
             onClick={async () => {
-              await fetch("/api/allocate", { method: "POST" });
-              router.push("/admin/allocation");
+              const res = await fetch("/api/allocate", { method: "POST" });
+              if (res.ok) {
+                const data = await res.json();
+                sessionStorage.setItem("allocationSummary", JSON.stringify(data.summary || null));
+                router.push("/admin/allocation");
+              }
             }}
             className="px-4 py-2 bg-emerald-600 text-white rounded"
           >
             Zuteilen (nur Ranglisten-Modell)
           </button>
+          <div className="pt-2">
+            <button
+              onClick={async () => {
+                const confirmed = window.confirm("Testdaten (20 Projekte, 500 Schüler) erzeugen? Bestehende Daten werden überschrieben.");
+                if (!confirmed) return;
+                const res = await fetch("/api/admin/seed-test", { method: "POST" });
+                if (res.ok) setMsg("Testdaten erzeugt");
+                else setMsg("Fehler beim Erzeugen der Testdaten");
+              }}
+              className="px-4 py-2 border rounded"
+            >
+              Testdaten erzeugen (20 Projekte, 500 Schüler)
+            </button>
+          </div>
         </div>
       </section>
     </div>
