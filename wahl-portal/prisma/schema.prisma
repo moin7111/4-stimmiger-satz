@@ -1,0 +1,78 @@
+// Prisma schema for the Wahl-Portal
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum SelectionModel {
+  DIRECT
+  RANKED
+}
+
+model Settings {
+  id              Int             @id @default(1)
+  selectionModel  SelectionModel  @default(DIRECT)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
+
+model ClassGroup {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique
+  students  Student[]
+  allowedIn ProjectAllowedClass[]
+}
+
+model Project {
+  id              Int                     @id @default(autoincrement())
+  name            String
+  leader          String
+  description     String?
+  capacity        Int
+  allowedClasses  ProjectAllowedClass[]
+  selections      StudentSelection[]
+  studentsAssigned Student[]             @relation("StudentAssignedProject")
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+}
+
+model ProjectAllowedClass {
+  projectId    Int
+  classGroupId Int
+  project      Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  classGroup   ClassGroup @relation(fields: [classGroupId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, classGroupId])
+}
+
+model Student {
+  id                String            @id @default(uuid())
+  firstName         String
+  lastName          String
+  classGroupId      Int
+  classGroup        ClassGroup        @relation(fields: [classGroupId], references: [id])
+  selections        StudentSelection[]
+  assignedProjectId Int?
+  assignedProject   Project?          @relation("StudentAssignedProject", fields: [assignedProjectId], references: [id])
+  createdAt         DateTime          @default(now())
+
+  @@index([classGroupId])
+}
+
+model StudentSelection {
+  studentId String
+  projectId Int
+  rank      Int
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([studentId, rank])
+  @@index([projectId])
+}
