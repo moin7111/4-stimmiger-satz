@@ -80,6 +80,11 @@ def xy_to_angle(origin, pt):
     angle = math.atan2(dx, dy)
     return angle
 
+def draw_text_at(text, x, y, font=('Helvetica', 12), number_of_lines=0):
+    # Helper: draw text at (x,y) by measuring its bounding box for ui.draw_string
+    w, h = ui.measure_string(text, font=font, number_of_lines=number_of_lines)
+    ui.draw_string(text, (x, y, w, h), font=font, number_of_lines=number_of_lines)
+
 # ---------- Visual/Simulation View -----------------------------
 
 class PendulumView(ui.View):
@@ -150,12 +155,12 @@ class PendulumView(ui.View):
         ui.set_color('blue')
         for s in self.stamps:
             ui.Path.oval(s['x']-5, s['y']-5, 10, 10).fill()
-            ui.draw_string(s['text'], (s['x']+8, s['y']-8), font=('Helvetica', 12))
+            draw_text_at(s['text'], s['x']+8, s['y']-8, font=('Helvetica', 12))
 
         # overlay time
         ui.set_color('black')
         tlabel = 't = {:.3f} s'.format(self.model.sim_time)
-        ui.draw_string(tlabel, (8, r.h - 28), font=('Helvetica', 16))
+        draw_text_at(tlabel, 8, r.h - 28, font=('Helvetica', 16))
 
     # Touch handling: allow dragging of first or second bob to set start angles
     def touch_began(self, touch):
