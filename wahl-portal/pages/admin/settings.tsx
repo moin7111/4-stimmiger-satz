@@ -65,7 +65,7 @@ export default function AdminSettings() {
     <div className="max-w-5xl mx-auto p-6 space-y-8">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold">Einstellungen</h1>
-        <button onClick={() => signOut({ callbackUrl: "/admin/login" })} className="text-sm underline">Logout</button>
+        <button onClick={() => signOut({ callbackUrl: "/" })} className="text-sm underline">Logout</button>
       </div>
 
       <section>
