@@ -91,17 +91,26 @@ export default function AdminSettings() {
                   "• alle Klassen",
                   "• alle Projekte",
                   "• alle Anmeldungen/Einträge und Ranglisten",
+                  "• alle abgegebenen Wahlen (gewählte Projekte)",
                   "• alle Zuteilungen",
                   "\nEinstellungen werden auf Standard (Direktwahl) zurückgesetzt.",
                 ].join("\n")
               );
               if (!confirmed) return;
+              const confirmed2 = window.confirm(
+                [
+                  "Letzte Bestätigung",
+                  "\nDiese Aktion kann NICHT rückgängig gemacht werden.",
+                  "\nJetzt endgültig ALLES löschen?",
+                ].join("\n")
+              );
+              if (!confirmed2) return;
               const res = await fetch("/api/admin/reset", { method: "POST" });
               if (res.ok) {
                 setSettings({ selectionModel: "DIRECT" });
                 setClasses([]);
                 setProjects([]);
-                setMsg("Alle Daten wurden gelöscht.");
+                setMsg("Alle Daten (Klassen, Projekte, Anmeldungen/Ranglisten, Wahlen und Zuteilungen) wurden gelöscht.");
               } else {
                 try {
                   const body = await res.json();
