@@ -94,6 +94,87 @@ def rk4_step(state, dt, params, f):
     return [s1[i] + dt * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]) / 6.0 for i in range(len(s1))]
 
 
+# ------------------------ Integratoren & Helfer -----------------
+
+def symplectic_euler_step(state, dt, params, f):
+    """Symplektischer Euler-Schritt (semi-implizit).
+    Erwartet f(state, params) -> Ableitungen. Nutzt nur die Beschleunigungen.
+    """
+    n = len(state)
+    if n == 4:
+        th1, w1, th2, w2 = state
+        d = f([th1, w1, th2, w2], params)
+        a1 = d[1]
+        a2 = d[3]
+        w1 = w1 + dt * a1
+        w2 = w2 + dt * a2
+        th1 = th1 + dt * w1
+        th2 = th2 + dt * w2
+        return [th1, w1, th2, w2]
+    elif n == 2:
+        th, w = state
+        d = f([th, w], params)
+        a = d[1]
+        w = w + dt * a
+        th = th + dt * w
+        return [th, w]
+    else:
+        # Fallback: klassischer Euler (sollte nicht vorkommen)
+        d = f(state, params)
+        return [state[i] + dt * d[i] for i in range(n)]
+
+
+def rk4_integrate_substeps(state, dt_total, dt_max, params, f):
+    """Integriert dt_total via RK4 in Teil-Schritten, jeder <= dt_max."""
+    steps = max(1, int(math.ceil(abs(dt_total) / max(1e-9, dt_max))))
+    dt = float(dt_total) / steps
+    s = list(state)
+    for _ in range(steps):
+        s = rk4_step(s, dt, params, f)
+    return s
+
+
+def choose_dt_max(state, base_dt=0.005, max_dt=0.02):
+    """Heuristische Wahl von dt_max basierend auf max. Winkelgeschwindigkeit."""
+    if len(state) == 4:
+        w_max = max(abs(state[1]), abs(state[3]))
+    else:
+        w_max = abs(state[1])
+    if w_max <= 0.1:
+        return max_dt
+    dt = min(max_dt, base_dt / (1.0 + w_max))
+    return max(1e-4, dt)
+
+
+def total_energy(state, params, mode='double'):
+    """Gesamtenergie (kinetisch + potenziell). Referenz y=0 am Aufhängepunkt."""
+    g = float(params['g'])
+    if mode == 'double' and len(state) == 4:
+        th1, w1, th2, w2 = state
+        m1 = float(params['m1']); m2 = float(params['m2'])
+        l1 = float(params['l1']); l2 = float(params['l2'])
+        # Geschwindigkeiten
+        x1dot = l1 * w1 * math.cos(th1)
+        y1dot = -l1 * w1 * math.sin(th1)
+        x2dot = x1dot + l2 * w2 * math.cos(th2)
+        y2dot = y1dot - l2 * w2 * math.sin(th2)
+        KE = 0.5 * m1 * (x1dot * x1dot + y1dot * y1dot) + 0.5 * m2 * (x2dot * x2dot + y2dot * y2dot)
+        # Potenzial
+        y1 = -l1 * math.cos(th1)
+        y2 = y1 - l2 * math.cos(th2)
+        PE = m1 * g * y1 + m2 * g * y2
+        return KE + PE
+    else:
+        th, w = state[:2]
+        m = float(params['m1'])
+        l = float(params['l1'])
+        xdot = l * w * math.cos(th)
+        ydot = -l * w * math.sin(th)
+        KE = 0.5 * m * (xdot * xdot + ydot * ydot)
+        y = -l * math.cos(th)
+        PE = m * g * y
+        return KE + PE
+
 # ------------------------ Geometrie ----------------------------
 
 def polar_to_xy(origin, angle, length):
@@ -356,7 +437,17 @@ class PendulumModel(object):
         self.sim_time = 0.0
         self.running = False
         self.time_scale = 1.0
-        self.dt = 0.01
+        # Basis-Integrationsparameter
+        self.dt = 0.01  # veraltet für alten Loop, bleibt als Fallback
+        self.integrator = 'rk4'  # 'rk4' | 'symplectic'
+        self.base_dt = 0.005  # RK4 Substep Baseline
+        self.dt_max = 0.02  # Obergrenze für Substeps/Schritte
+        self.energy_ref = None
+        self.energy_err = 0.0
+        self.energy_check_interval = 0.5  # in Simulationssekunden
+        self._energy_accum = 0.0
+        self.autoswitch = True
+        self.energy_threshold = 0.1  # 10% erlaubter Fehler bevor Maßnahmen
         self.pixels_per_meter = 180.0
         self.trail_enabled = True
         self.trail_max = 300
@@ -385,13 +476,72 @@ class PendulumModel(object):
             self.state = [math.radians(60), 0.0]
         self.sim_time = 0.0
         self.stop_at = None
+        self.energy_ref = None
+        self.energy_err = 0.0
+        self._energy_accum = 0.0
 
     def step(self, dt):
+        # Legacy-Einzelschritt via RK4 für kleine dt (weiterhin für state_at_time genutzt)
         if self.mode == 'double':
             self.state = rk4_step(self.state, dt, self.params, derivs_double)
         else:
             self.state = rk4_step(self.state, dt, self.params, derivs_single)
         self.sim_time += dt
+
+    def integrate(self, dt_total: float):
+        # Wähle DGL
+        if self.mode == 'double':
+            f = derivs_double
+            mode = 'double'
+        else:
+            f = derivs_single
+            mode = 'single'
+
+        # Energy-Referenz initialisieren (nur ohne Dämpfung sinnvoll)
+        if self.energy_ref is None and float(self.params.get('damping', 0.0)) == 0.0:
+            try:
+                self.energy_ref = total_energy(self.state, self.params, mode=mode)
+            except Exception:
+                self.energy_ref = 0.0
+
+        # Integrationsschritte ausführen
+        if self.integrator == 'rk4':
+            dtmx = min(self.dt_max, choose_dt_max(self.state, base_dt=self.base_dt, max_dt=self.dt_max))
+            self.state = rk4_integrate_substeps(self.state, dt_total, dtmx, self.params, f)
+        else:
+            # Symplektischer Euler, günstig und stabil – ggf. adaptives dt_max
+            dtmx = min(self.dt_max, choose_dt_max(self.state, base_dt=max(0.008, self.base_dt * 2.0), max_dt=self.dt_max))
+            steps = max(1, int(math.ceil(abs(dt_total) / max(1e-9, dtmx))))
+            small = float(dt_total) / steps
+            s = list(self.state)
+            for _ in range(steps):
+                s = symplectic_euler_step(s, small, self.params, f)
+            self.state = s
+
+        self.sim_time += dt_total
+
+        # Energie überwachen, bei Dämpfung überspringen
+        if float(self.params.get('damping', 0.0)) == 0.0:
+            self._energy_accum += dt_total
+            if self._energy_accum >= self.energy_check_interval:
+                self._energy_accum = 0.0
+                try:
+                    e = total_energy(self.state, self.params, mode=mode)
+                    e0 = self.energy_ref if self.energy_ref is not None else e
+                    denom = max(1e-9, abs(e0))
+                    self.energy_err = abs(e - e0) / denom
+                except Exception:
+                    self.energy_err = 0.0
+
+                # Autoadaption / Autoswitch
+                if self.autoswitch and self.integrator == 'symplectic' and self.energy_err > self.energy_threshold:
+                    self.integrator = 'rk4'
+                else:
+                    # einfache dt_max-Anpassung
+                    if self.energy_err > self.energy_threshold * 0.5:
+                        self.dt_max = max(0.001, self.dt_max * 0.8)
+                    else:
+                        self.dt_max = min(0.05, self.dt_max * 1.05)
 
     def state_at_time(self, t: float):
         # unabhängige Vorwärtsintegration vom Reset-Zustand
@@ -621,7 +771,7 @@ class PendulumApp(object):
         ctrl.add_subview(sp_lbl)
         self.speed_slider = ui.Slider(frame=(16, y + 24, width - 90, 20))
         self.speed_slider.minimum_value = 0.1
-        self.speed_slider.maximum_value = 3.0
+        self.speed_slider.maximum_value = 10.0
         self.speed_slider.value = 1.0
         self.speed_slider.tint_color = '#1565C0'
         self.speed_slider.action = lambda s: self.update_speed(float(s.value))
@@ -633,6 +783,36 @@ class PendulumApp(object):
         self.speed_val.text_color = '#222222'
         ctrl.add_subview(self.speed_val)
         y += 54
+        add_separator(y)
+        y += 14
+
+        # Integrator-Modus
+        int_lbl = ui.Label(frame=(16, y, 160, 20))
+        int_lbl.text = 'Integrator'
+        int_lbl.text_color = '#555555'
+        int_lbl.font = ('Helvetica', 12)
+        ctrl.add_subview(int_lbl)
+        self.int_seg = ui.SegmentedControl(frame=(16, y + 22, width - 32, 28))
+        self.int_seg.segments = ['Accurate (RK4)', 'Fast (Symplectic)']
+        self.int_seg.selected_index = 0
+        self.int_seg.tint_color = '#1565C0'
+        self.int_seg.action = self.change_integrator
+        ctrl.add_subview(self.int_seg)
+        y += 60
+        add_separator(y)
+        y += 14
+
+        # AutoSwitch
+        auto_lbl = ui.Label(frame=(16, y, 200, 24))
+        auto_lbl.text = 'AutoSwitch bei Energie-Drift'
+        auto_lbl.font = ('Helvetica', 12)
+        auto_lbl.text_color = '#555555'
+        ctrl.add_subview(auto_lbl)
+        self.autosw_switch = ui.Switch(frame=(width - 16 - 60, y, 60, 24))
+        self.autosw_switch.value = True
+        self.autosw_switch.action = lambda s: self.toggle_autoswitch(bool(s.value))
+        ctrl.add_subview(self.autosw_switch)
+        y += 36
         add_separator(y)
         y += 14
 
@@ -784,6 +964,21 @@ class PendulumApp(object):
         self.model.time_scale = val
         self.speed_val.text = '{:.1f}x'.format(val)
 
+    def change_integrator(self, sender):
+        idx = getattr(sender, 'selected_index', 0)
+        if idx == 0:
+            self.model.integrator = 'rk4'
+            # Präzisere Voreinstellungen
+            self.model.base_dt = 0.004
+            self.model.dt_max = 0.015
+        else:
+            self.model.integrator = 'symplectic'
+            # Schnellere, robuste Voreinstellungen
+            self.model.base_dt = 0.008
+            self.model.dt_max = 0.035
+        # Energie-Referenz neu setzen bei Moduswechsel
+        self.model.energy_ref = None
+
     def update_damping(self, val: float):
         val = max(0.0, float(val))
         self.model.params['damping'] = val
@@ -797,6 +992,9 @@ class PendulumApp(object):
         self.model.trail_enabled = bool(enabled)
         if not enabled:
             self.clear_trail()
+
+    def toggle_autoswitch(self, enabled: bool):
+        self.model.autoswitch = bool(enabled)
 
     def clear_trail(self):
         self.draw_view.trail_points = []
@@ -883,11 +1081,15 @@ class PendulumApp(object):
                 self._apply_param_fields()
                 self.set_stop_time()
 
-                # Stabilität: dt in Schritte unterteilen
-                steps = max(1, int(dt / self.model.dt))
-                small = dt / steps
-                for _ in range(steps):
-                    self.model.step(small)
+                # Integriere mit neuem Integrator + Substepping intern
+                try:
+                    self.model.integrate(dt)
+                except Exception:
+                    # Fallback auf alten kleinen Step, falls etwas schief geht
+                    steps = max(1, int(dt / max(1e-4, self.model.dt)))
+                    small = dt / steps
+                    for _ in range(steps):
+                        self.model.step(small)
 
                 # Trail aktualisieren
                 r = self.draw_view.bounds
@@ -916,7 +1118,7 @@ class PendulumApp(object):
                     ui.delay(lambda: self.pause(), 0)
                     break
 
-                # Redraw im Hauptthread
+                # Redraw im Hauptthread + Energieanzeige evtl. künftig
                 ui.delay(self.draw_view.set_needs_display, 0)
                 time.sleep(0.016)
 
