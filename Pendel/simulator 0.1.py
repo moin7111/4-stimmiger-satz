@@ -421,7 +421,7 @@ class PendulumApp(object):
 
         # Layout
         self.draw_view = PendulumView(self.model)
-        self.draw_view.flex = 'H'
+        self.draw_view.flex = 'WH'
         self.view.add_subview(self.draw_view)
 
         self.ctrl = ui.View()
@@ -722,20 +722,25 @@ class PendulumApp(object):
         except Exception:
             inset_left = inset_right = inset_top = inset_bottom = 0.0
 
+        # Vertikale Safe-Area einkalkulieren
+        y0 = max(0, inset_top)
+        usable_h = max(0, total_h - inset_top - inset_bottom)
+
         if total_w >= 980:
             # Zwei Spalten: Zeichenfläche links, Steuerpanel rechts mit Abstand
             left_x = side_pad + inset_left
-            ctrl_x = total_w - inset_right - side_pad - ctrl_w
-            draw_w = max(100, ctrl_x - spacing - left_x)
-            self.draw_view.frame = (left_x, 0, draw_w, total_h)
-            self.ctrl.frame = (ctrl_x, 0, ctrl_w, total_h)
+            right_pad = side_pad + inset_right
+            draw_w = max(160, total_w - left_x - right_pad - ctrl_w - spacing)
+            ctrl_x = left_x + draw_w + spacing
+            self.draw_view.frame = (left_x, y0, draw_w, usable_h)
+            self.ctrl.frame = (ctrl_x, y0, ctrl_w, usable_h)
         else:
             # Gestapelt untereinander auf kleineren Displays
-            ctrl_h = min(420, total_h * 0.48)
-            content_w = max(100, total_w - side_pad - inset_left - side_pad - inset_right)
+            ctrl_h = int(min(420, usable_h * 0.48))
+            content_w = max(200, total_w - side_pad - inset_left - side_pad - inset_right)
             left_x = side_pad + inset_left
-            self.draw_view.frame = (left_x, 0, content_w, total_h - ctrl_h)
-            self.ctrl.frame = (left_x, total_h - ctrl_h, content_w, ctrl_h)
+            self.draw_view.frame = (left_x, y0, content_w, usable_h - ctrl_h - spacing)
+            self.ctrl.frame = (left_x, y0 + usable_h - ctrl_h, content_w, ctrl_h)
 
     # ---------- Controller-Aktionen ----------
     def toggle_run(self, sender):
