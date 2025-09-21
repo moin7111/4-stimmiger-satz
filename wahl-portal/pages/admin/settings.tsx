@@ -291,7 +291,7 @@ export default function AdminSettings() {
         {results.length > 0 && (
           <div className="mt-3 overflow-auto">
             <table className="w-full text-sm border">
-              <thead className="bg-gray-50">
+              <thead className="bg-gray-50 text-black">
                 <tr>
                   <th className="text-left p-2 border">Name</th>
                   <th className="text-left p-2 border">Klasse</th>
