@@ -78,8 +78,22 @@ def rk4_step(state, dt, params):
 # ---------- Hilfsfunktionen -----------------------------------
 
 def polar_to_xy(origin, angle, length):
-    x = origin[0] + length * math.sin(angle)
-    y = origin[1] + length * math.cos(angle)
+    # Robust gegen versehentlich verschachtelte Tupel
+    try:
+        ox, oy = origin
+        if isinstance(ox, (tuple, list)):
+            ox, oy = ox
+        ox = float(ox)
+        oy = float(oy)
+        angle = float(angle)
+        length = float(length)
+    except Exception:
+        ox = float(origin[0])
+        oy = float(origin[1])
+        angle = float(angle)
+        length = float(length)
+    x = ox + length * math.sin(angle)
+    y = oy + length * math.cos(angle)
     return (x, y)
 
 
@@ -295,15 +309,16 @@ class PendulumView(ui.View):
 
         # Sehr dezentes Gitter
         ui.set_color((0.9, 0.9, 0.9, 0.5))
-        ui.set_line_width(0.5)
         grid_spacing = 50
         for x in range(0, int(r.w), grid_spacing):
             path = ui.Path()
+            path.line_width = 0.5
             path.move_to(x, 0)
             path.line_to(x, r.h)
             path.stroke()
         for y in range(0, int(r.h), grid_spacing):
             path = ui.Path()
+            path.line_width = 0.5
             path.move_to(0, y)
             path.line_to(r.w, y)
             path.stroke()
@@ -323,9 +338,9 @@ class PendulumView(ui.View):
                 for i in range(1, len(self.trail)):
                     alpha = max(0.1, 0.5 * (i / len(self.trail)))
                     ui.set_color((0.13, 0.59, 0.95, alpha))  # Blau mit Transparenz
-                    ui.set_line_width(1.5)
                     path = ui.Path()
                     if path is not None:  # Überprüfung ob Path erstellt wurde
+                        path.line_width = 1.5
                         path.move_to(self.trail[i-1][0], self.trail[i-1][1])
                         path.line_to(self.trail[i][0], self.trail[i][1])
                         path.stroke()
@@ -335,12 +350,12 @@ class PendulumView(ui.View):
 
         # rods - minimalistisch
         ui.set_color('#424242')
-        ui.set_line_width(2)
 
         # Erste Stange
         try:
             p = ui.Path()
             if p is not None:
+                p.line_width = 2
                 p.move_to(origin[0], origin[1])
                 p.line_to(x1, y1)
                 p.stroke()
@@ -351,6 +366,7 @@ class PendulumView(ui.View):
         try:
             p2 = ui.Path()
             if p2 is not None:
+                p2.line_width = 2
                 p2.move_to(x1, y1)
                 p2.line_to(x2, y2)
                 p2.stroke()
@@ -376,8 +392,9 @@ class PendulumView(ui.View):
         # draw stamps - Zeitmarkierungen
         ui.set_color('#2196F3')
         for s in self.stamps:
-            ui.set_line_width(1.5)
-            ui.Path.oval(s['x']-4, s['y']-4, 8, 8).stroke()
+            path = ui.Path.oval(s['x']-4, s['y']-4, 8, 8)
+            path.line_width = 1.5
+            path.stroke()
             draw_text_at(s['text'], s['x']+8, s['y']-8, font=('Helvetica', 10))
 
         # Zeit-Anzeige - minimalistisch
@@ -1001,11 +1018,11 @@ class PendulumApp(object):
         total_w = r.w
         total_h = r.h
         ctrl_w = 280
-        spacing = 0
+        spacing = 12
         if total_w >= 980:
             # two columns
             self.draw_view.frame = (0, 0, total_w - ctrl_w - spacing, total_h)
-            self.ctrl.frame = (total_w - ctrl_w, 0, ctrl_w, total_h)
+            self.ctrl.frame = (total_w - ctrl_w - spacing, 0, ctrl_w, total_h)
         else:
             # stacked, controls below
             ctrl_h = min(360, total_h * 0.42)

@@ -97,8 +97,24 @@ def rk4_step(state, dt, params, f):
 # ------------------------ Geometrie ----------------------------
 
 def polar_to_xy(origin, angle, length):
-    x = origin[0] + length * math.sin(angle)
-    y = origin[1] + length * math.cos(angle)
+    # Robust handling if origin is accidentally nested (e.g., ((x, y), ...))
+    try:
+        ox, oy = origin
+        if isinstance(ox, (tuple, list)):
+            # flatten one nesting level
+            ox, oy = ox
+        ox = float(ox)
+        oy = float(oy)
+        angle = float(angle)
+        length = float(length)
+    except Exception:
+        # Best effort fallback
+        ox = float(origin[0])
+        oy = float(origin[1])
+        angle = float(angle)
+        length = float(length)
+    x = ox + length * math.sin(angle)
+    y = oy + length * math.cos(angle)
     return (x, y)
 
 
@@ -160,23 +176,24 @@ class PendulumView(ui.View):
 
         # feines wissenschaftliches Raster
         ui.set_color((0.92, 0.92, 0.92, 1.0))
-        ui.set_line_width(0.5)
         grid = 50
         for x in range(0, int(r.w) + 1, grid):
             p = ui.Path()
+            p.line_width = 0.5
             p.move_to(x, 0)
             p.line_to(x, r.h)
             p.stroke()
         for y in range(0, int(r.h) + 1, grid):
             p = ui.Path()
+            p.line_width = 0.5
             p.move_to(0, y)
             p.line_to(r.w, y)
             p.stroke()
 
         # Achsen
         ui.set_color((0.75, 0.75, 0.75, 1.0))
-        ui.set_line_width(1.0)
         p = ui.Path()
+        p.line_width = 1.0
         p.move_to(cx, 0)
         p.line_to(cx, r.h)
         p.stroke()
@@ -201,22 +218,23 @@ class PendulumView(ui.View):
             for i in range(1, total):
                 alpha = max(0.08, 0.6 * (i / float(total)))
                 ui.set_color((0.12, 0.47, 0.71, alpha))  # Blau
-                ui.set_line_width(1.5)
                 p = ui.Path()
+                p.line_width = 1.5
                 p.move_to(self.trail_points[i - 1][0], self.trail_points[i - 1][1])
                 p.line_to(self.trail_points[i][0], self.trail_points[i][1])
                 p.stroke()
 
         # Stäbe
         ui.set_color('#424242')
-        ui.set_line_width(2.0)
         p = ui.Path()
+        p.line_width = 2.0
         p.move_to(origin[0], origin[1])
         p.line_to(x1, y1)
         p.stroke()
 
         if mode == 'double':
             p2 = ui.Path()
+            p2.line_width = 2.0
             p2.move_to(x1, y1)
             p2.line_to(x2, y2)
             p2.stroke()
@@ -237,8 +255,9 @@ class PendulumView(ui.View):
         # Stempel (Zeitmarken)
         ui.set_color('#0D47A1')
         for s in self.stamps:
-            ui.set_line_width(1.2)
-            ui.Path.oval(s['x'] - 4, s['y'] - 4, 8, 8).stroke()
+            path = ui.Path.oval(s['x'] - 4, s['y'] - 4, 8, 8)
+            path.line_width = 1.2
+            path.stroke()
             draw_text_at(s['text'], s['x'] + 8, s['y'] - 10, font=('Helvetica', 10), color='#0D47A1')
 
         # Zeit-Anzeige
@@ -692,8 +711,9 @@ class PendulumApp(object):
         ctrl_w = 300
         if total_w >= 980:
             # zwei Spalten
-            self.draw_view.frame = (0, 0, total_w - ctrl_w, total_h)
-            self.ctrl.frame = (total_w - ctrl_w, 0, ctrl_w, total_h)
+            spacing = 12
+            self.draw_view.frame = (0, 0, total_w - ctrl_w - spacing, total_h)
+            self.ctrl.frame = (total_w - ctrl_w - spacing, 0, ctrl_w, total_h)
         else:
             # gestapelt
             ctrl_h = min(420, total_h * 0.48)
