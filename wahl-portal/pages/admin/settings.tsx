@@ -17,8 +17,19 @@ export default function AdminSettings() {
   const [projectForm, setProjectForm] = useState({ name: "", leader: "", description: "", capacity: 20, allowedClassIds: [] as number[] });
   const [msg, setMsg] = useState<string | null>(null);
   const [search, setSearch] = useState({ q: "", classGroupId: "", projectId: "" });
-  const [results, setResults] = useState<any[]>([]);
-  const [editing, setEditing] = useState<any | null>(null);
+  type StudentSummary = {
+    id: string;
+    firstName: string;
+    lastName: string;
+    classGroupId: number;
+    classGroup?: { id: number; name: string } | null;
+    assignedProjectId?: number | null;
+    assignedProject?: { id: number; name: string } | null;
+    selections?: { rank: number; projectId: number }[];
+  };
+
+  const [results, setResults] = useState<StudentSummary[]>([]);
+  const [editing, setEditing] = useState<StudentSummary | null>(null);
 
   useEffect(() => {
     if (status === "authenticated") {
@@ -232,7 +243,7 @@ export default function AdminSettings() {
                 </tr>
               </thead>
               <tbody>
-                {results.map((s) => (
+                {results.map((s: StudentSummary) => (
                   <tr key={s.id} className="border-t">
                     <td className="p-2">{s.firstName} {s.lastName}</td>
                     <td className="p-2">{s.classGroup?.name}</td>
@@ -248,9 +259,9 @@ export default function AdminSettings() {
           <div className="mt-4 p-4 border rounded">
             <h3 className="font-semibold mb-2">Eintrag bearbeiten</h3>
             <div className="grid gap-2 sm:grid-cols-3">
-              <input className="border rounded p-2" value={editing.firstName} onChange={(e) => setEditing((prev: any) => ({ ...prev, firstName: e.target.value }))} />
-              <input className="border rounded p-2" value={editing.lastName} onChange={(e) => setEditing((prev: any) => ({ ...prev, lastName: e.target.value }))} />
-              <select className="border rounded p-2" value={editing.classGroupId} onChange={(e) => setEditing((prev: any) => ({ ...prev, classGroupId: Number(e.target.value) }))}>
+              <input className="border rounded p-2" value={editing.firstName} onChange={(e) => setEditing((prev) => (prev ? { ...prev, firstName: e.target.value } : prev))} />
+              <input className="border rounded p-2" value={editing.lastName} onChange={(e) => setEditing((prev) => (prev ? { ...prev, lastName: e.target.value } : prev))} />
+              <select className="border rounded p-2" value={editing.classGroupId} onChange={(e) => setEditing((prev) => (prev ? { ...prev, classGroupId: Number(e.target.value) } : prev))}>
                 {classes.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
@@ -259,7 +270,7 @@ export default function AdminSettings() {
             {settings?.selectionModel === "DIRECT" ? (
               <div className="mt-3">
                 <label className="block text-sm mb-1">Zugeordnetes Projekt (optional)</label>
-                <select className="border rounded p-2" value={editing.assignedProjectId ?? ""} onChange={(e) => setEditing((prev: any) => ({ ...prev, assignedProjectId: e.target.value ? Number(e.target.value) : null }))}>
+                <select className="border rounded p-2" value={editing.assignedProjectId ?? ""} onChange={(e) => setEditing((prev) => (prev ? { ...prev, assignedProjectId: e.target.value ? Number(e.target.value) : null } : prev))}>
                   <option value="">– keine –</option>
                   {projects.map((p) => (
                     <option key={p.id} value={p.id}>{p.name}</option>
@@ -273,12 +284,13 @@ export default function AdminSettings() {
                     <label className="block text-sm mb-1">{rank}. Wahl</label>
                     <select
                       className="border rounded p-2 w-full"
-                      value={editing.selections?.find((s: any) => s.rank === rank)?.projectId ?? ""}
+                      value={editing.selections?.find((s) => s.rank === rank)?.projectId ?? ""}
                       onChange={(e) => {
                         const pid = e.target.value ? Number(e.target.value) : null;
-                        setEditing((prev: any) => {
-                          const others = (prev.selections || []).filter((s: any) => s.rank !== rank);
-                          if (pid && others.some((s: any) => s.projectId === pid)) {
+                        setEditing((prev) => {
+                          if (!prev) return prev;
+                          const others = (prev.selections || []).filter((s) => s.rank !== rank);
+                          if (pid && others.some((s) => s.projectId === pid)) {
                             return prev; // prevent duplicates client-side
                           }
                           return pid ? { ...prev, selections: [...others, { rank, projectId: pid }] } : { ...prev, selections: others };
@@ -287,7 +299,7 @@ export default function AdminSettings() {
                     >
                       <option value="">– keine –</option>
                       {projects.map((p) => {
-                        const chosenIds = new Set((editing.selections || []).filter((s: any) => s.rank !== rank).map((s: any) => s.projectId));
+                        const chosenIds = new Set((editing.selections || []).filter((s) => s.rank !== rank).map((s) => s.projectId));
                         const disabled = chosenIds.has(p.id);
                         return <option key={p.id} value={p.id} disabled={disabled}>{p.name}{disabled ? " (bereits gewählt)" : ""}</option>;
                       })}
@@ -300,7 +312,15 @@ export default function AdminSettings() {
               <button
                 className="px-3 py-2 bg-blue-600 text-white rounded"
                 onClick={async () => {
-                  const payload: any = {
+                  type UpdateStudentPayload = {
+                    studentId: string;
+                    firstName?: string;
+                    lastName?: string;
+                    classGroupId?: number;
+                    assignedProjectId?: number | null;
+                    choices?: { projectId: number; rank: number }[];
+                  };
+                  const payload: UpdateStudentPayload = {
                     studentId: editing.id,
                     firstName: editing.firstName,
                     lastName: editing.lastName,
@@ -309,12 +329,12 @@ export default function AdminSettings() {
                   if (settings?.selectionModel === "DIRECT") {
                     payload.assignedProjectId = editing.assignedProjectId ?? null;
                   } else {
-                    const choices = (editing.selections || [])
-                      .filter((s: any) => s.projectId)
-                      .map((s: any) => ({ projectId: s.projectId, rank: s.rank }))
-                      .sort((a: any, b: any) => a.rank - b.rank);
+                    const choices: { projectId: number; rank: number }[] = (editing.selections || [])
+                      .filter((s) => typeof s.projectId === "number")
+                      .map((s) => ({ projectId: s.projectId, rank: s.rank }))
+                      .sort((a, b) => a.rank - b.rank);
                     // Ensure unique projects client-side
-                    const unique = new Set(choices.map((c: any) => c.projectId));
+                    const unique = new Set(choices.map((c) => c.projectId));
                     if (unique.size !== choices.length) {
                       setMsg("Jedes Projekt darf nur einmal gewählt werden.");
                       return;
@@ -344,7 +364,7 @@ export default function AdminSettings() {
                   if (res.status === 204) {
                     setMsg("Eintrag gelöscht");
                     setEditing(null);
-                    setResults((prev) => prev.filter((s: any) => s.id !== editing.id));
+                    setResults((prev) => prev.filter((s) => s.id !== editing.id));
                   }
                 }}
               >

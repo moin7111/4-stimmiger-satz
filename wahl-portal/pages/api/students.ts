@@ -1,4 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { studentCreateSchema, studentUpdateSchema } from "@/lib/validation";
 import { getServerSession } from "next-auth";
@@ -13,11 +14,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json(student);
     }
 
-    const where: any = {};
+    const where: Prisma.StudentWhereInput = {};
     if (q && q.trim()) {
       where.OR = [
-        { firstName: { contains: q, mode: "insensitive" } },
-        { lastName: { contains: q, mode: "insensitive" } },
+        { firstName: { contains: q } },
+        { lastName: { contains: q } },
       ];
     }
     if (classGroupId) {
