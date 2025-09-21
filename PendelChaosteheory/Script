@@ -29,6 +29,7 @@ def derivs(state, params):
     m1 = params['m1']; m2 = params['m2']
     l1 = params['l1']; l2 = params['l2']
     g = params['g']
+    damping = params.get('damping', 0.0)
 
     delta = th2 - th1
 
@@ -46,6 +47,11 @@ def derivs(state, params):
 
     num2 = 2*math.sin(delta)*(w1*w1*l1*(m1+m2) + g*(m1+m2)*math.cos(th1) + w2*w2*l2*m2*math.cos(delta))
     domega2 = num2 / (l2 * denom2)
+
+    # simple viscous damping on angular velocities
+    if damping:
+        domega1 -= damping * w1
+        domega2 -= damping * w2
 
     return [w1, domega1, w2, domega2]
 
@@ -103,10 +109,121 @@ class PendulumView(ui.View):
         self.set_needs_display()
         # for dragging
         self.dragging = None
+        self._tap_candidate = False
+        self._tap_start = 0.0
         # prepare double-buffer-like trail storage
         self.trail = []  # list of (x,y)
         # stamps: list of dicts with x,y,text
         self.stamps = []
+        # callbacks (assigned by controller)
+        self.cb_toggle = None
+        self.cb_reset = None
+        self.cb_change_mode = None
+        self.cb_update_speed = None
+        self.cb_update_damping = None
+        self.cb_toggle_trail = None
+        self.cb_clear_trail = None
+
+        # build compact HUD overlay for small screens
+        self._build_hud()
+
+    def _build_hud(self):
+        hud = ui.View()
+        hud.background_color = (1,1,1,0.85)
+        hud.corner_radius = 10
+        hud.frame = (12, 12, 320, 148)
+        hud.flex = 'RB'
+
+        y = 8
+        # row 1: Start/Pause + Reset + Mode
+        self.btn_play = ui.Button(frame=(8,y,92,32))
+        self.btn_play.title = 'Start'
+        self.btn_play.action = lambda s: self.cb_toggle and self.cb_toggle(s)
+        hud.add_subview(self.btn_play)
+
+        btn_reset = ui.Button(frame=(108,y,92,32))
+        btn_reset.title = 'Reset'
+        btn_reset.action = lambda s: self.cb_reset and self.cb_reset(s)
+        hud.add_subview(btn_reset)
+
+        self.mode_seg_small = ui.SegmentedControl(frame=(208,y,104,32))
+        self.mode_seg_small.segments = ['Double','Single']
+        self.mode_seg_small.selected_index = 0
+        self.mode_seg_small.action = lambda s: self.cb_change_mode and self.cb_change_mode(s)
+        hud.add_subview(self.mode_seg_small)
+        y += 36
+
+        # row 2: Speed
+        lbl_speed = ui.Label(frame=(8,y,60,22))
+        lbl_speed.text = 'Speed'
+        lbl_speed.font = ('<System>', 12)
+        hud.add_subview(lbl_speed)
+
+        self.speed_val_lbl = ui.Label(frame=(268,y,44,22))
+        self.speed_val_lbl.alignment = ui.ALIGN_RIGHT
+        self.speed_val_lbl.font = ('<System>', 12)
+        self.speed_val_lbl.text = '1.00x'
+        hud.add_subview(self.speed_val_lbl)
+
+        self.speed_slider_small = ui.Slider(frame=(66,y,198,22))
+        # Map to [0.05, 3.0]
+        self.speed_slider_small.minimum_value = 0.05
+        self.speed_slider_small.maximum_value = 3.0
+        self.speed_slider_small.value = 1.0
+        def on_speed(s):
+            val = max(0.05, float(s.value))
+            self.speed_val_lbl.text = '{:.2f}x'.format(val)
+            if self.cb_update_speed:
+                self.cb_update_speed(val)
+        self.speed_slider_small.action = on_speed
+        hud.add_subview(self.speed_slider_small)
+        y += 28
+
+        # row 3: Damping + Trail
+        lbl_damp = ui.Label(frame=(8,y,60,22))
+        lbl_damp.text = 'Dämpf.'
+        lbl_damp.font = ('<System>', 12)
+        hud.add_subview(lbl_damp)
+
+        self.damp_val_lbl = ui.Label(frame=(268,y,44,22))
+        self.damp_val_lbl.alignment = ui.ALIGN_RIGHT
+        self.damp_val_lbl.font = ('<System>', 12)
+        self.damp_val_lbl.text = '0.00'
+        hud.add_subview(self.damp_val_lbl)
+
+        self.damp_slider = ui.Slider(frame=(66,y,198,22))
+        self.damp_slider.minimum_value = 0.0
+        self.damp_slider.maximum_value = 0.1
+        self.damp_slider.value = 0.0
+        def on_damp(s):
+            val = max(0.0, float(s.value))
+            self.damp_val_lbl.text = '{:.2f}'.format(val)
+            if self.cb_update_damping:
+                self.cb_update_damping(val)
+        self.damp_slider.action = on_damp
+        hud.add_subview(self.damp_slider)
+        y += 28
+
+        self.trail_switch = ui.Switch(frame=(66,y,56,28))
+        self.trail_switch.value = True
+        self.trail_switch.action = lambda s: self.cb_toggle_trail and self.cb_toggle_trail(bool(s.value))
+        hud.add_subview(self.trail_switch)
+
+        lbl_trail = ui.Label(frame=(8,y,56,22))
+        lbl_trail.text = 'Trail'
+        lbl_trail.font = ('<System>', 12)
+        hud.add_subview(lbl_trail)
+
+        btn_clear = ui.Button(frame=(132,y,80,28))
+        btn_clear.title = 'Clear'
+        btn_clear.action = lambda s: self.cb_clear_trail and self.cb_clear_trail()
+        hud.add_subview(btn_clear)
+
+        self.add_subview(hud)
+        self.hud = hud
+
+    def set_playing(self, playing):
+        self.btn_play.title = 'Pause' if playing else 'Start'
 
     def draw(self):
         # drawing callback
@@ -190,9 +307,23 @@ class PendulumView(ui.View):
             self.dragging = 'bob1'
         else:
             self.dragging = None
+            self._tap_candidate = True
+            try:
+                self._tap_start = touch.timestamp
+            except Exception:
+                self._tap_start = time.time()
 
     def touch_moved(self, touch):
         if not self.dragging:
+            # if finger moves too far, cancel tap candidate
+            try:
+                px, py = touch.prev_location
+            except Exception:
+                px, py = touch.location
+            dx = touch.location[0] - px
+            dy = touch.location[1] - py
+            if dx*dx + dy*dy > 36:
+                self._tap_candidate = False
             return
         r = self.bounds
         cx = r.w * 0.5
@@ -219,7 +350,31 @@ class PendulumView(ui.View):
             self.set_needs_display()
 
     def touch_ended(self, touch):
+        if self.dragging:
+            self.dragging = None
+            return
+        # toggle play/pause on simple tap
+        if self._tap_candidate:
+            self._tap_candidate = False
+            if self.cb_toggle:
+                self.cb_toggle(self)
         self.dragging = None
+
+    # hooks from controller
+    def attach_callbacks(self, *, on_toggle, on_reset, on_change_mode, on_speed, on_damping, on_toggle_trail, on_clear_trail):
+        self.cb_toggle = on_toggle
+        self.cb_reset = on_reset
+        self.cb_change_mode = on_change_mode
+        self.cb_update_speed = on_speed
+        self.cb_update_damping = on_damping
+        self.cb_toggle_trail = on_toggle_trail
+        self.cb_clear_trail = on_clear_trail
+
+        # sync HUD initial values
+        self.speed_slider_small.value = getattr(self, 'speed_slider_small', self.speed_slider_small).value
+        self.speed_val_lbl.text = '{:.2f}x'.format(1.0)
+        self.damp_slider.value = 0.0
+        self.damp_val_lbl.text = '0.00'
 
 # ---------- Model (zustand + simulation-loop) ------------------
 
@@ -231,7 +386,8 @@ class PendulumModel(object):
             'm2': 1.0,
             'l1': 1.0,   # meters
             'l2': 1.0,
-            'g': 9.81
+            'g': 9.81,
+            'damping': 0.0
         }
         # initial state: theta measured from vertical (downwards)
         self.state = [math.radians(120), 0.0, math.radians(-10), 0.0]
@@ -242,6 +398,7 @@ class PendulumModel(object):
         self.pixels_per_meter = 180.0  # scaling for drawing
         self.trail_max = 400
         self.trail = []
+        self.trail_enabled = True
         self.stop_at = None  # if set, simulation will stop at this sim_time
 
     def step(self, dt):
@@ -272,6 +429,7 @@ class PendulumModel(object):
 class PendulumApp(object):
     def __init__(self):
         self.model = PendulumModel()
+        # root view with responsive layout
         self.view = ui.View()
         self.view.name = 'Doppelpendel — Demo'
         self.view.background_color = 'white'
@@ -290,7 +448,7 @@ class PendulumApp(object):
         # right: controls
         w = 300
         ctrl = ui.View(frame=(700,0,w,700))
-        ctrl.flex = 'LH'
+        ctrl.flex = 'WH'
         ctrl.background_color = (0.96,0.96,0.96)
 
         y = 12
@@ -299,6 +457,7 @@ class PendulumApp(object):
             lbl = ui.Label(frame=(10,y, w-20, 26))
             lbl.text = text
             lbl.font = ('<System>', 14)
+            lbl.flex = 'W'
             ctrl.add_subview(lbl)
             y += 30
             return lbl
@@ -309,6 +468,7 @@ class PendulumApp(object):
         self.btn_run = ui.Button(frame=(10,y, w-20, 40))
         self.btn_run.title = 'Start'
         self.btn_run.action = self.toggle_run
+        self.btn_run.flex = 'W'
         ctrl.add_subview(self.btn_run)
         y += 48
 
@@ -316,6 +476,7 @@ class PendulumApp(object):
         btn_reset = ui.Button(frame=(10,y, w-20, 34))
         btn_reset.title = 'Reset'
         btn_reset.action = lambda sender: self.reset()
+        btn_reset.flex = 'W'
         ctrl.add_subview(btn_reset)
         y += 42
 
@@ -324,15 +485,43 @@ class PendulumApp(object):
         self.mode_seg.segments = ['Double','Single']
         self.mode_seg.selected_index = 0
         self.mode_seg.action = self.change_mode
+        self.mode_seg.flex = 'W'
         ctrl.add_subview(self.mode_seg)
         y += 42
 
         # Speed slider
         add_label('Zeit-Skalierung (Speed)')
         self.speed_slider = ui.Slider(frame=(10,y, w-20, 34))
+        self.speed_slider.minimum_value = 0.05
+        self.speed_slider.maximum_value = 3.0
         self.speed_slider.value = 1.0
-        self.speed_slider.action = self.update_speed
+        self.speed_slider.action = lambda s: self.update_speed_value(float(s.value))
+        self.speed_slider.flex = 'W'
         ctrl.add_subview(self.speed_slider)
+        y += 42
+
+        # Damping slider
+        add_label('Dämpfung')
+        self.damping_slider = ui.Slider(frame=(10,y, w-20, 34))
+        self.damping_slider.minimum_value = 0.0
+        self.damping_slider.maximum_value = 0.1
+        self.damping_slider.value = 0.0
+        self.damping_slider.action = lambda s: self.update_damping(float(s.value))
+        self.damping_slider.flex = 'W'
+        ctrl.add_subview(self.damping_slider)
+        y += 42
+
+        # Trail toggle + clear
+        add_label('Spur aktiv')
+        sw = ui.Switch(frame=(10,y, 54, 34))
+        sw.value = True
+        sw.action = lambda s: self.toggle_trail(bool(s.value))
+        ctrl.add_subview(sw)
+        btn_clear = ui.Button(frame=(80,y, w-90, 34))
+        btn_clear.title = 'Spur löschen'
+        btn_clear.action = lambda s: self.clear_trail()
+        btn_clear.flex = 'W'
+        ctrl.add_subview(btn_clear)
         y += 42
 
         # Trail length
@@ -342,6 +531,7 @@ class PendulumApp(object):
         self.trail_slider.minimum_value = 10
         self.trail_slider.maximum_value = 1200
         self.trail_slider.action = self.update_trail
+        self.trail_slider.flex = 'W'
         ctrl.add_subview(self.trail_slider)
         y += 42
 
@@ -349,10 +539,12 @@ class PendulumApp(object):
         add_label('Automatisch stoppen bei t (s)')
         self.stop_field = ui.TextField(frame=(10,y, w-120, 34))
         self.stop_field.placeholder = 'z.B. 12.5'
+        self.stop_field.flex = 'W'
         ctrl.add_subview(self.stop_field)
         btn_setstop = ui.Button(frame=(w-100,y,90,34))
         btn_setstop.title = 'Set Stop'
         btn_setstop.action = self.set_stop_time
+        btn_setstop.flex = 'L'
         ctrl.add_subview(btn_setstop)
         y += 42
 
@@ -360,10 +552,12 @@ class PendulumApp(object):
         add_label('Position berechnen bei t (s)')
         self.compute_field = ui.TextField(frame=(10,y, w-120, 34))
         self.compute_field.placeholder = 'z.B. 3.14'
+        self.compute_field.flex = 'W'
         ctrl.add_subview(self.compute_field)
         btn_comp = ui.Button(frame=(w-100,y,90,34))
         btn_comp.title = 'Compute'
         btn_comp.action = self.compute_and_stamp
+        btn_comp.flex = 'L'
         ctrl.add_subview(btn_comp)
         y += 42
 
@@ -371,10 +565,27 @@ class PendulumApp(object):
         add_label('Stamps (letzte)')
         self.stamps_label = ui.TextView(frame=(10,y, w-20, 140))
         self.stamps_label.editable = False
+        self.stamps_label.flex = 'WH'
         ctrl.add_subview(self.stamps_label)
         y += 148
 
         self.view.add_subview(ctrl)
+        self.ctrl = ctrl
+
+        # connect HUD callbacks to controller methods
+        self.draw_view.attach_callbacks(
+            on_toggle=self.toggle_run,
+            on_reset=lambda s: self.reset(),
+            on_change_mode=self.change_mode,
+            on_speed=self.update_speed_value,
+            on_damping=self.update_damping,
+            on_toggle_trail=self.toggle_trail,
+            on_clear_trail=self.clear_trail,
+        )
+
+        # ensure initial layout fits the screen
+        self.view.layout = self._layout_root
+        self._layout_root()
 
     # Control callbacks
     def toggle_run(self, sender):
@@ -389,11 +600,13 @@ class PendulumApp(object):
         self.model.running = True
         self.btn_run.title = 'Pause'
         self._start_timer()
+        self.draw_view.set_playing(True)
 
     def pause(self):
         self.model.running = False
         self.btn_run.title = 'Start'
         self._stop_timer()
+        self.draw_view.set_playing(False)
 
     def reset(self):
         self.model.reset()
@@ -409,11 +622,23 @@ class PendulumApp(object):
         else:
             self.model.params['m2'] = 1.0
 
-    def update_speed(self, sender):
-        self.model.time_scale = max(0.01, sender.value)
+    def update_speed_value(self, val):
+        self.model.time_scale = max(0.05, float(val))
 
     def update_trail(self, sender):
         self.model.trail_max = int(sender.value)
+
+    def update_damping(self, val):
+        self.model.params['damping'] = max(0.0, float(val))
+
+    def toggle_trail(self, enabled):
+        self.model.trail_enabled = bool(enabled)
+        if not enabled:
+            self.clear_trail()
+
+    def clear_trail(self):
+        self.draw_view.trail = []
+        self.draw_view.set_needs_display()
 
     def set_stop_time(self, sender):
         try:
@@ -479,11 +704,12 @@ class PendulumApp(object):
                 l2 = self.model.params['l2'] * self.model.pixels_per_meter
                 x1, y1 = polar_to_xy(origin, self.model.state[0], l1)
                 x2, y2 = polar_to_xy((x1,y1), self.model.state[2], l2)
-                self.draw_view.trail.append((x2,y2))
-                if len(self.draw_view.trail) > self.model.trail_max:
-                    self.draw_view.trail.pop(0)
-                # copy trail to view for drawing
-                self.draw_view.trail = list(self.draw_view.trail)
+                if self.model.trail_enabled:
+                    self.draw_view.trail.append((x2,y2))
+                    if len(self.draw_view.trail) > self.model.trail_max:
+                        self.draw_view.trail.pop(0)
+                    # copy trail to view for drawing
+                    self.draw_view.trail = list(self.draw_view.trail)
 
                 # check stop condition
                 if self.model.stop_at is not None and self.model.sim_time >= self.model.stop_at:
@@ -507,6 +733,23 @@ class PendulumApp(object):
     def present(self):
         # present the assembled UI
         self.view.present('fullscreen', hide_title_bar=True)
+
+    # responsive layout for root view
+    def _layout_root(self, *args, **kwargs):
+        r = self.view.bounds
+        total_w = r.w
+        total_h = r.h
+        ctrl_w = 320
+        spacing = 0
+        if total_w >= 980:
+            # two columns
+            self.draw_view.frame = (0, 0, total_w - ctrl_w - spacing, total_h)
+            self.ctrl.frame = (total_w - ctrl_w, 0, ctrl_w, total_h)
+        else:
+            # stacked, controls below
+            ctrl_h = min(360, total_h * 0.42)
+            self.draw_view.frame = (0, 0, total_w, total_h - ctrl_h - spacing)
+            self.ctrl.frame = (0, total_h - ctrl_h, total_w, ctrl_h)
 
 
 # Run the app
