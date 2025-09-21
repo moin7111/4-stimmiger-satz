@@ -32,6 +32,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const settings = await prisma.settings.findUnique({ where: { id: 1 } });
   const model = settings?.selectionModel || "DIRECT";
+  const now = new Date();
+  if (settings?.selectionStartEnabled && settings.selectionStartAt && now < settings.selectionStartAt) {
+    return res.status(403).json({ error: "Die Projektauswahl ist noch nicht freigeschaltet." });
+  }
 
   if (model === "DIRECT") {
     const parsed = selectionDirectSchema.safeParse(req.body);

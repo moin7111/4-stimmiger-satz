@@ -18,6 +18,30 @@ export const studentCreateSchema = z.object({
   classGroupId: z.number().int().positive(),
 });
 
+export const studentUpdateSchema = z.object({
+  studentId: z.string().uuid(),
+  firstName: z.string().min(1).max(100).optional(),
+  lastName: z.string().min(1).max(100).optional(),
+  classGroupId: z.number().int().positive().optional(),
+  assignedProjectId: z.number().int().positive().nullable().optional(),
+  choices: z
+    .array(
+      z.object({
+        projectId: z.number().int().positive(),
+        rank: z.number().int().min(1).max(3),
+      }),
+    )
+    .min(1)
+    .max(3)
+    .refine((arr) => new Set(arr.map((c) => c.rank)).size === arr.length, {
+      message: "Ranks must be unique",
+    })
+    .refine((arr) => new Set(arr.map((c) => c.projectId)).size === arr.length, {
+      message: "Projects must be unique across choices",
+    })
+    .optional(),
+});
+
 export const selectionDirectSchema = z.object({
   studentId: z.string().uuid(),
   projectId: z.number().int().positive(),
@@ -33,6 +57,12 @@ export const selectionRankedSchema = z.object({
       }),
     )
     .min(1)
-    .max(3),
+    .max(3)
+    .refine((arr) => new Set(arr.map((c) => c.rank)).size === arr.length, {
+      message: "Ranks must be unique",
+    })
+    .refine((arr) => new Set(arr.map((c) => c.projectId)).size === arr.length, {
+      message: "Projects must be unique across choices",
+    }),
 });
 
