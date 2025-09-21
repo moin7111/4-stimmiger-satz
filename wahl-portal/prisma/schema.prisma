@@ -19,6 +19,7 @@ model Settings {
   id              Int             @id @default(1)
   selectionModel  SelectionModel  @default(DIRECT)
   selectionStartAt DateTime?
+  selectionStartEnabled Boolean   @default(false)
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 }

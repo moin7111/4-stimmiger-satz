@@ -3,7 +3,7 @@ import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 
-type Settings = { selectionModel: "DIRECT" | "RANKED" };
+type Settings = { selectionModel: "DIRECT" | "RANKED"; selectionStartAt?: string | null; selectionStartEnabled?: boolean };
 type ClassGroup = { id: number; name: string };
 type Project = { id: number; name: string; leader: string; description?: string | null; capacity: number; allowedClasses: { classGroupId: number; classGroup: { id: number; name: string } }[] };
 
@@ -40,6 +40,18 @@ export default function AdminSettings() {
       setSettings(await res.json());
       setMsg("Gespeichert");
     }
+  };
+
+  const toLocalDatetimeValue = (iso?: string | null) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const y = d.getFullYear();
+    const m = pad(d.getMonth() + 1);
+    const day = pad(d.getDate());
+    const h = pad(d.getHours());
+    const min = pad(d.getMinutes());
+    return `${y}-${m}-${day}T${h}:${min}`;
   };
 
   const addClass = async () => {
@@ -81,6 +93,51 @@ export default function AdminSettings() {
           </label>
         </div>
         {msg && <p className="text-green-700 text-sm mt-2">{msg}</p>}
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={Boolean(settings?.selectionStartEnabled)}
+              onChange={async (e) => {
+                const res = await fetch("/api/settings", {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ selectionStartEnabled: e.target.checked }),
+                });
+                if (res.ok) {
+                  setSettings(await res.json());
+                  setMsg(e.target.checked ? "Freigabe aktiviert" : "Freigabe deaktiviert");
+                }
+              }}
+            />
+            <span className="text-sm">Freigabe per Datum/Uhrzeit aktivieren</span>
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              type="datetime-local"
+              className="border rounded p-2"
+              value={toLocalDatetimeValue(settings?.selectionStartAt ?? null)}
+              onChange={(e) => setSettings((prev) => (prev ? { ...prev, selectionStartAt: e.target.value ? new Date(e.target.value).toISOString() : null } : prev))}
+            />
+            <button
+              onClick={async () => {
+                const res = await fetch("/api/settings", {
+                  method: "PUT",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ selectionStartAt: settings?.selectionStartAt ?? null }),
+                });
+                if (res.ok) {
+                  setSettings(await res.json());
+                  setMsg("Startzeit aktualisiert");
+                }
+              }}
+              className="px-3 py-2 border rounded"
+            >
+              Startzeit speichern
+            </button>
+          </div>
+          
+        </div>
         <div className="mt-4 flex gap-3">
           <button
             onClick={async () => {

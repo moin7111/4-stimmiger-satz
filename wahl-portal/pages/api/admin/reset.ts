@@ -33,8 +33,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // Reset settings to defaults
       await tx.settings.upsert({
         where: { id: 1 },
-        update: { selectionModel: "DIRECT", selectionStartAt: null },
-        create: { id: 1, selectionModel: "DIRECT" },
+        update: { selectionModel: "DIRECT", selectionStartAt: null, selectionStartEnabled: false },
+        create: { id: 1, selectionModel: "DIRECT", selectionStartEnabled: false },
       });
     });
 

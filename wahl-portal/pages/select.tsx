@@ -11,7 +11,7 @@ type Project = {
   studentsAssigned?: { id: string }[];
 };
 
-type Settings = { selectionModel: "DIRECT" | "RANKED" };
+type Settings = { selectionModel: "DIRECT" | "RANKED"; selectionStartAt?: string | null; selectionStartEnabled?: boolean };
 
 export default function Select() {
   const router = useRouter();
@@ -83,10 +83,20 @@ export default function Select() {
 
   if (!settings) return null;
 
+  const startGateActive = Boolean(settings.selectionStartEnabled) && settings.selectionStartAt ? new Date(settings.selectionStartAt) : null;
+  const notYetOpen = startGateActive ? new Date() < startGateActive : false;
+
   return (
     <div className="max-w-3xl mx-auto p-6">
       <h1 className="text-2xl font-bold mb-4">Projektauswahl</h1>
-      {settings.selectionModel === "RANKED" ? (
+      {notYetOpen ? (
+        <div className="p-4 border rounded bg-yellow-50 text-yellow-800">
+          Die Projektauswahl ist noch nicht freigeschaltet.
+          {startGateActive && (
+            <div className="text-sm mt-1">Start: {new Date(startGateActive).toLocaleString()}</div>
+          )}
+        </div>
+      ) : settings.selectionModel === "RANKED" ? (
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium">Erstwunsch</label>

@@ -31,14 +31,35 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!session) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-    const { selectionModel } = req.body as { selectionModel?: "DIRECT" | "RANKED" };
-    if (!selectionModel || !["DIRECT", "RANKED"].includes(selectionModel)) {
-      return res.status(400).json({ error: "Invalid selectionModel" });
+    const { selectionModel, selectionStartAt, selectionStartEnabled } = req.body as { selectionModel?: "DIRECT" | "RANKED"; selectionStartAt?: string | null; selectionStartEnabled?: boolean };
+
+    if (!selectionModel && selectionStartAt === undefined && selectionStartEnabled === undefined) {
+      return res.status(400).json({ error: "No updatable fields provided" });
     }
-    const updated = await prisma.settings.update({
-      where: { id: 1 },
-      data: { selectionModel },
-    });
+
+    const data: Record<string, unknown> = {};
+    if (selectionModel) {
+      if (!["DIRECT", "RANKED"].includes(selectionModel)) {
+        return res.status(400).json({ error: "Invalid selectionModel" });
+      }
+      data.selectionModel = selectionModel;
+    }
+    if (selectionStartAt !== undefined) {
+      if (selectionStartAt === null || selectionStartAt === "") {
+        data.selectionStartAt = null;
+      } else {
+        const d = new Date(selectionStartAt);
+        if (isNaN(d.getTime())) {
+          return res.status(400).json({ error: "Invalid selectionStartAt" });
+        }
+        data.selectionStartAt = d;
+      }
+    }
+    if (selectionStartEnabled !== undefined) {
+      data.selectionStartEnabled = Boolean(selectionStartEnabled);
+    }
+
+    const updated = await prisma.settings.update({ where: { id: 1 }, data });
     return res.status(200).json(updated);
   }
 
