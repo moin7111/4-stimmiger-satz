@@ -165,6 +165,23 @@ class PendulumPhysics:
             PE = m * g * y
             return KE + PE
 
+    @staticmethod
+    def normalize_angles(state):
+        """Normalisiert Winkel auf den Bereich [-pi, pi] ohne die Winkelgeschwindigkeiten zu ändern."""
+        def wrap(angle):
+            # Robust modulo für Python: Ergebnis in (-pi, pi]
+            two_pi = 2.0 * math.pi
+            a = (angle + math.pi) % two_pi
+            if a < 0:
+                a += two_pi
+            return a - math.pi
+        s = list(state)
+        if len(s) >= 2:
+            s[0] = wrap(s[0])
+        if len(s) >= 4:
+            s[2] = wrap(s[2])
+        return s
+
 
 # ===================== Visualisierung =====================
 
@@ -187,6 +204,8 @@ class PendulumCanvas(ui.View):
         self.scale = 150  # Pixel pro Meter
         self.time = 0.0
         self.marks = []
+        self.dragging = None  # 'bob1' | 'bob2' | None
+        self.controller = None  # wird vom Simulator gesetzt
         
     def draw(self):
         """Zeichnet die Pendel-Visualisierung"""
@@ -281,6 +300,92 @@ class PendulumCanvas(ui.View):
         time_text = f'Zeit: {self.time:.2f} s'
         ui.draw_string(time_text, (10, height - 30, 150, 20), 
                       font=('Helvetica', 14))
+
+    # --- Interaktion: Startpunkt durch Ziehen setzen ---
+    def _origin_xy(self):
+        return (self.width / 2.0, self.height * 0.2)
+
+    def _polar_to_xy(self, origin, angle, length):
+        ox, oy = origin
+        return (ox + length * math.sin(angle), oy + length * math.cos(angle))
+
+    def _xy_to_angle(self, origin, pt):
+        dx = pt[0] - origin[0]
+        dy = pt[1] - origin[1]
+        # Winkel von der Vertikalen (nach unten) gemessen
+        return math.atan2(dx, dy)
+
+    def touch_began(self, touch):
+        try:
+            tx, ty = touch.location
+        except Exception:
+            return
+        origin = self._origin_xy()
+        l1 = self.params['l1'] * self.scale
+        l2 = self.params['l2'] * self.scale
+        if self.mode == 'double':
+            th1, _, th2, _ = self.state
+            x1, y1 = self._polar_to_xy(origin, th1, l1)
+            x2, y2 = self._polar_to_xy((x1, y1), th2, l2)
+        else:
+            th1, _ = self.state
+            x1, y1 = self._polar_to_xy(origin, th1, l1)
+            x2, y2 = x1, y1
+        # Auswahl testen (Radius ~ 20 px)
+        if self.mode == 'double' and (tx - x2) ** 2 + (ty - y2) ** 2 < 20 * 20:
+            self.dragging = 'bob2'
+        elif (tx - x1) ** 2 + (ty - y1) ** 2 < 20 * 20:
+            self.dragging = 'bob1'
+        else:
+            self.dragging = None
+        # Beim Start des Draggens ggf. Simulation pausieren
+        if self.dragging and getattr(self, 'controller', None) is not None:
+            try:
+                if self.controller.running:
+                    self.controller.stop_simulation()
+            except Exception:
+                pass
+
+    def touch_moved(self, touch):
+        if not self.dragging:
+            return
+        try:
+            tx, ty = touch.location
+        except Exception:
+            return
+        origin = self._origin_xy()
+        l1 = self.params['l1'] * self.scale
+        # bob1: Winkel relativ zum Aufhängepunkt
+        if self.dragging == 'bob1':
+            th1 = self._xy_to_angle(origin, (tx, ty))
+            if self.mode == 'double' and len(self.state) == 4:
+                self.state[0] = th1
+                self.state[1] = 0.0
+            else:
+                self.state[0] = th1
+                self.state[1] = 0.0
+        # bob2: Winkel relativ zur ersten Masse
+        elif self.dragging == 'bob2' and self.mode == 'double' and len(self.state) == 4:
+            th1 = self.state[0]
+            x1, y1 = self._polar_to_xy(origin, th1, l1)
+            th2 = self._xy_to_angle((x1, y1), (tx, ty))
+            self.state[2] = th2
+            self.state[3] = 0.0
+        # Winkel normalisieren und Anzeigen aktualisieren
+        self.state = PendulumPhysics.normalize_angles(self.state)
+        self.set_needs_display()
+        # Gewählten Startzustand merken (für Reset)
+        if getattr(self, 'controller', None) is not None:
+            try:
+                if self.mode == 'double':
+                    self.controller.start_state = list(self.state)
+                else:
+                    self.controller.start_state = list(self.state[:2])
+            except Exception:
+                pass
+
+    def touch_ended(self, touch):
+        self.dragging = None
     
     def add_trail_point(self, x, y):
         """Fügt einen Punkt zur Spur hinzu"""
@@ -328,6 +433,8 @@ class PendulumSimulator:
         
         # UI erstellen
         self.create_ui()
+        # Startzustand merken (für Reset)
+        self.start_state = list(self.canvas.state) if self.canvas.mode == 'double' else list(self.canvas.state[:2])
         
     def create_ui(self):
         """Erstellt die Benutzeroberfläche"""
@@ -339,6 +446,7 @@ class PendulumSimulator:
         # Canvas
         self.canvas = PendulumCanvas()
         self.canvas.flex = 'WH'
+        self.canvas.controller = self
         
         # Control Panel
         self.create_control_panel()
@@ -663,10 +771,21 @@ class PendulumSimulator:
         self.stop_simulation()
         
         # Zustand zurücksetzen
-        if self.canvas.mode == 'double':
-            self.canvas.state = [math.radians(45), 0, math.radians(-30), 0]
-        else:
-            self.canvas.state = [math.radians(45), 0]
+        try:
+            if self.canvas.mode == 'double':
+                if hasattr(self, 'start_state') and len(self.start_state) == 4:
+                    self.canvas.state = list(self.start_state)
+                else:
+                    self.canvas.state = [math.radians(45), 0, math.radians(-30), 0]
+            else:
+                if hasattr(self, 'start_state') and len(self.start_state) >= 2:
+                    self.canvas.state = list(self.start_state[:2])
+                else:
+                    self.canvas.state = [math.radians(45), 0]
+        except Exception:
+            self.canvas.state = [math.radians(45), 0, math.radians(-30), 0] if self.canvas.mode == 'double' else [math.radians(45), 0]
+        # Winkel normalisieren
+        self.canvas.state = self.physics.normalize_angles(self.canvas.state)
         
         self.canvas.time = 0.0
         self.canvas.clear_trail()
@@ -712,6 +831,8 @@ class PendulumSimulator:
                 for _ in range(steps):
                     s = self.physics.symplectic_euler_step(s, small, self.canvas.params, deriv_func)
                 self.canvas.state = s
+            # Winkel normalisieren (numerische Stabilität, klareres Verhalten)
+            self.canvas.state = self.physics.normalize_angles(self.canvas.state)
             
             self.canvas.time += sim_dt
 
@@ -797,11 +918,15 @@ class PendulumSimulator:
                                     math.radians(-30), 0]
             self.l2_field.enabled = True
             self.m2_field.enabled = True
+            # Startzustand anpassen
+            self.start_state = list(self.canvas.state)
         else:
             self.canvas.mode = 'single'
             self.canvas.state = self.canvas.state[:2]
             self.l2_field.enabled = False
             self.m2_field.enabled = False
+            # Startzustand anpassen
+            self.start_state = list(self.canvas.state)
         
         self.canvas.clear_trail()
         self.canvas.set_needs_display()
