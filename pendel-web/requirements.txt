@@ -1,0 +1,8 @@
+# Runtime
+streamlit==1.38.0
+plotly==5.24.1
+numpy==2.1.2
+
+# Optional (aus):
+# numba==0.60.0
+
