@@ -4,7 +4,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
 
-from .physics import (
+from server.physics import (
     choose_dt_max,
     double_pendulum_derivatives,
     normalize_angles,

@@ -1,0 +1,25 @@
+version: "3.8"
+services:
+  pendel:
+    build: .
+    image: pendel-web:latest
+    container_name: pendel-web
+    restart: unless-stopped
+    environment:
+      - STREAMLIT_SERVER_ENABLECORS=true
+      - STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION=true
+    ports:
+      - "127.0.0.1:18501:8501"  # bind only to loopback for reverse proxy isolation
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    volumes:
+      - type: bind
+        source: ./server/.streamlit
+        target: /app/server/.streamlit
+        read_only: true
+
