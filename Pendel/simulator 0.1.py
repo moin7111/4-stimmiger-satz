@@ -71,6 +71,81 @@ class PendulumPhysics:
         return [state[i] + dt * (k1[i] + 2*k2[i] + 2*k3[i] + k4[i]) / 6.0 
                 for i in range(len(state))]
 
+    @staticmethod
+    def symplectic_euler_step(state, dt, params, deriv_func):
+        """Symplektischer Euler-Schritt (semi-implizit)."""
+        n = len(state)
+        if n == 4:
+            th1, w1, th2, w2 = state
+            d = deriv_func([th1, w1, th2, w2], params)
+            a1 = d[1]
+            a2 = d[3]
+            w1 = w1 + dt * a1
+            w2 = w2 + dt * a2
+            th1 = th1 + dt * w1
+            th2 = th2 + dt * w2
+            return [th1, w1, th2, w2]
+        elif n == 2:
+            th, w = state
+            d = deriv_func([th, w], params)
+            a = d[1]
+            w = w + dt * a
+            th = th + dt * w
+            return [th, w]
+        else:
+            d = deriv_func(state, params)
+            return [state[i] + dt * d[i] for i in range(n)]
+
+    @staticmethod
+    def rk4_integrate_substeps(state, dt_total, dt_max, params, deriv_func):
+        """Integriert dt_total via RK4 in Teil-Schritten, jeder <= dt_max."""
+        steps = max(1, int(math.ceil(abs(dt_total) / max(1e-9, dt_max))))
+        dt = float(dt_total) / steps
+        s = list(state)
+        for _ in range(steps):
+            s = PendulumPhysics.rk4_step(s, dt, params, deriv_func)
+        return s
+
+    @staticmethod
+    def choose_dt_max(state, base_dt=0.005, max_dt=0.02):
+        """Heuristische Wahl von dt_max basierend auf max. Winkelgeschwindigkeit."""
+        if len(state) == 4:
+            w_max = max(abs(state[1]), abs(state[3]))
+        else:
+            w_max = abs(state[1]) if len(state) > 1 else 0.0
+        if w_max <= 0.1:
+            return max_dt
+        dt = min(max_dt, base_dt / (1.0 + w_max))
+        return max(1e-4, dt)
+
+    @staticmethod
+    def total_energy(state, params, mode='double'):
+        """Gesamtenergie (kinetisch + potenziell). Referenz y=0 am Aufhängepunkt."""
+        g = float(params['g'])
+        if mode == 'double' and len(state) == 4:
+            th1, w1, th2, w2 = state
+            m1 = float(params['m1']); m2 = float(params['m2'])
+            l1 = float(params['l1']); l2 = float(params['l2'])
+            x1dot = l1 * w1 * math.cos(th1)
+            y1dot = -l1 * w1 * math.sin(th1)
+            x2dot = x1dot + l2 * w2 * math.cos(th2)
+            y2dot = y1dot - l2 * w2 * math.sin(th2)
+            KE = 0.5 * m1 * (x1dot**2 + y1dot**2) + 0.5 * m2 * (x2dot**2 + y2dot**2)
+            y1 = -l1 * math.cos(th1)
+            y2 = y1 - l2 * math.cos(th2)
+            PE = m1 * g * y1 + m2 * g * y2
+            return KE + PE
+        else:
+            th, w = state[:2]
+            m = float(params['m1'])
+            l = float(params['l1'])
+            xdot = l * w * math.cos(th)
+            ydot = -l * w * math.sin(th)
+            KE = 0.5 * m * (xdot**2 + ydot**2)
+            y = -l * math.cos(th)
+            PE = m * g * y
+            return KE + PE
+
 
 # ===================== Visualisierung =====================
 
@@ -221,6 +296,16 @@ class PendulumSimulator:
         self.time_scale = 1.0
         self.thread = None
         self.stop_flag = False
+        # Integrator/Physik-Parameter
+        self.integrator = 'rk4'  # 'rk4' | 'symplectic'
+        self.base_dt = 0.005
+        self.dt_max = 0.02
+        self.energy_ref = None
+        self.energy_err = 0.0
+        self.energy_check_interval = 0.5
+        self._energy_accum = 0.0
+        self.autoswitch = True
+        self.energy_threshold = 0.1
         
         # UI erstellen
         self.create_ui()
@@ -385,6 +470,36 @@ class PendulumSimulator:
         self.speed_value.frame = (245, y_pos + 25, 45, 30)
         panel.add_subview(self.speed_value)
         y_pos += 60
+
+        # Integrator-Auswahl
+        self.add_separator(panel, y_pos)
+        y_pos += 10
+
+        int_label = ui.Label()
+        int_label.text = 'Integrator:'
+        int_label.frame = (10, y_pos, 100, 30)
+        panel.add_subview(int_label)
+
+        self.integrator_control = ui.SegmentedControl()
+        self.integrator_control.segments = ['Accurate (RK4)', 'Fast (Symplectic)']
+        self.integrator_control.selected_index = 0
+        self.integrator_control.frame = (110, y_pos, 180, 30)
+        self.integrator_control.action = self.change_integrator
+        panel.add_subview(self.integrator_control)
+        y_pos += 40
+
+        # AutoSwitch-Einstellung
+        autosw_label = ui.Label()
+        autosw_label.text = 'AutoSwitch:'
+        autosw_label.frame = (10, y_pos, 100, 30)
+        panel.add_subview(autosw_label)
+
+        self.autoswitch_switch = ui.Switch()
+        self.autoswitch_switch.value = True
+        self.autoswitch_switch.frame = (110, y_pos, 60, 30)
+        self.autoswitch_switch.action = self.toggle_autoswitch
+        panel.add_subview(self.autoswitch_switch)
+        y_pos += 40
         
         # Spur-Kontrollen
         self.add_separator(panel, y_pos)
@@ -493,10 +608,13 @@ class PendulumSimulator:
         self.canvas.time = 0.0
         self.canvas.clear_trail()
         self.canvas.clear_marks()
+        # Energie-/Integrator-Refs zurücksetzen
+        self.energy_ref = None
+        self.energy_err = 0.0
+        self._energy_accum = 0.0
     
     def simulation_loop(self):
         """Hauptschleife der Simulation"""
-        dt = 0.01
         last_time = time.time()
         
         while self.running and not self.stop_flag:
@@ -504,8 +622,8 @@ class PendulumSimulator:
             elapsed = current_time - last_time
             last_time = current_time
             
-            # Zeitschritt anpassen
-            sim_dt = dt * self.time_scale
+            # Zeitschritt anpassen (reale Zeit * Skalierung)
+            sim_dt = max(0.0, elapsed * self.time_scale)
             
             # Parameter aktualisieren
             self.update_parameters()
@@ -516,11 +634,60 @@ class PendulumSimulator:
             else:
                 deriv_func = self.physics.single_pendulum_derivatives
             
-            self.canvas.state = self.physics.rk4_step(
-                self.canvas.state, sim_dt, self.canvas.params, deriv_func
-            )
+            # Integration mit wählbarem Integrator + Substepping
+            if self.integrator == 'rk4':
+                dtmx = min(self.dt_max, self.physics.choose_dt_max(self.canvas.state, base_dt=self.base_dt, max_dt=self.dt_max))
+                self.canvas.state = self.physics.rk4_integrate_substeps(
+                    self.canvas.state, sim_dt, dtmx, self.canvas.params, deriv_func
+                )
+            else:
+                # Symplektischer Euler mit adaptivem dt_max
+                dtmx = min(self.dt_max, self.physics.choose_dt_max(self.canvas.state, base_dt=max(0.008, self.base_dt * 2.0), max_dt=self.dt_max))
+                steps = max(1, int(math.ceil(abs(sim_dt) / max(1e-9, dtmx))))
+                small = float(sim_dt) / steps if steps else 0.0
+                s = list(self.canvas.state)
+                for _ in range(steps):
+                    s = self.physics.symplectic_euler_step(s, small, self.canvas.params, deriv_func)
+                self.canvas.state = s
             
             self.canvas.time += sim_dt
+
+            # Energie-Überwachung (nur ohne Dämpfung sinnvoll)
+            try:
+                damping = float(self.canvas.params.get('damping', 0.0))
+            except Exception:
+                damping = 0.0
+            if damping == 0.0:
+                mode = 'double' if self.canvas.mode == 'double' else 'single'
+                if self.energy_ref is None:
+                    try:
+                        self.energy_ref = self.physics.total_energy(self.canvas.state, self.canvas.params, mode=mode)
+                    except Exception:
+                        self.energy_ref = 0.0
+                self._energy_accum += sim_dt
+                if self._energy_accum >= self.energy_check_interval:
+                    self._energy_accum = 0.0
+                    try:
+                        e = self.physics.total_energy(self.canvas.state, self.canvas.params, mode=mode)
+                        e0 = self.energy_ref if self.energy_ref is not None else e
+                        denom = max(1e-9, abs(e0))
+                        self.energy_err = abs(e - e0) / denom
+                    except Exception:
+                        self.energy_err = 0.0
+
+                    # AutoSwitch oder dt_max-Anpassung
+                    if self.autoswitch and self.integrator == 'symplectic' and self.energy_err > self.energy_threshold:
+                        self.integrator = 'rk4'
+                        if hasattr(self, 'integrator_control'):
+                            try:
+                                ui.delay(lambda: setattr(self.integrator_control, 'selected_index', 0), 0)
+                            except Exception:
+                                pass
+                    else:
+                        if self.energy_err > self.energy_threshold * 0.5:
+                            self.dt_max = max(0.001, self.dt_max * 0.85)
+                        else:
+                            self.dt_max = min(0.05, self.dt_max * 1.05)
             
             # Trail-Update
             if self.canvas.trail_enabled:
@@ -590,6 +757,27 @@ class PendulumSimulator:
         """Aktualisiert die Simulationsgeschwindigkeit"""
         self.time_scale = sender.value
         self.speed_value.text = f'{sender.value:.1f}x'
+
+    def change_integrator(self, sender):
+        """Wechselt den Integrator-Modus"""
+        idx = getattr(sender, 'selected_index', 0)
+        if idx == 0:
+            self.integrator = 'rk4'
+            self.base_dt = 0.004
+            self.dt_max = 0.015
+        else:
+            self.integrator = 'symplectic'
+            self.base_dt = 0.008
+            self.dt_max = 0.035
+        # Energie-Referenz zurücksetzen
+        self.energy_ref = None
+
+    def toggle_autoswitch(self, sender):
+        """Schaltet AutoSwitch bei Energie-Drift um"""
+        try:
+            self.autoswitch = bool(sender.value)
+        except Exception:
+            self.autoswitch = True
     
     def toggle_trail(self, sender):
         """Schaltet die Spur an/aus"""
