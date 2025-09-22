@@ -38,7 +38,7 @@ class PendulumPhysics:
         sin = math.sin
         cos = math.cos
 
-        delta = th2 - th1
+        delta = th1 - th2
         sin_th1 = sin(th1)
         cos_th1 = cos(th1)
         sin_th2 = sin(th2)
@@ -422,14 +422,16 @@ class PendulumSimulator:
         self.stop_flag = False
         # Integrator/Physik-Parameter
         self.integrator = 'rk4'  # 'rk4' | 'symplectic'
-        self.base_dt = 0.005
-        self.dt_max = 0.02
+        self.base_dt = 0.004
+        self.dt_max = 0.015
         self.energy_ref = None
         self.energy_err = 0.0
         self.energy_check_interval = 0.5
         self._energy_accum = 0.0
         self.autoswitch = True
         self.energy_threshold = 0.1
+        self.normalize_every_n = 20
+        self._norm_counter = 0
         
         # UI erstellen
         self.create_ui()
@@ -628,6 +630,13 @@ class PendulumSimulator:
         panel.add_subview(self.autoswitch_switch)
         y_pos += 40
 
+        # Energie-Drift Anzeige
+        self.energy_label = ui.Label()
+        self.energy_label.text = 'ΔE/E: —'
+        self.energy_label.frame = (10, y_pos, 280, 25)
+        panel.add_subview(self.energy_label)
+        y_pos += 30
+
         # Integrator-Parameter (dt_max & base_dt)
         self.add_separator(panel, y_pos)
         y_pos += 10
@@ -639,7 +648,7 @@ class PendulumSimulator:
 
         self.dtmax_slider = ui.Slider()
         self.dtmax_slider.minimum_value = 0.005
-        self.dtmax_slider.maximum_value = 0.10
+        self.dtmax_slider.maximum_value = 0.05
         self.dtmax_slider.value = self.dt_max
         self.dtmax_slider.frame = (10, y_pos + 25, 230, 30)
         self.dtmax_slider.action = self.update_dt_max
@@ -753,6 +762,27 @@ class PendulumSimulator:
         
         # Parameter aktualisieren
         self.update_parameters()
+
+        # Energie-Referenz initialisieren (ohne Dämpfung)
+        try:
+            damping = float(self.canvas.params.get('damping', 0.0))
+        except Exception:
+            damping = 0.0
+        if damping == 0.0:
+            mode = 'double' if self.canvas.mode == 'double' else 'single'
+            try:
+                self.energy_ref = self.physics.total_energy(self.canvas.state, self.canvas.params, mode=mode)
+            except Exception:
+                self.energy_ref = 0.0
+        else:
+            self.energy_ref = None
+        self.energy_err = 0.0
+        self._energy_accum = 0.0
+        if hasattr(self, 'energy_label'):
+            try:
+                ui.delay(lambda: setattr(self.energy_label, 'text', 'ΔE/E: 0.000%'), 0)
+            except Exception:
+                pass
         
         # Simulationsthread starten
         self.thread = threading.Thread(target=self.simulation_loop)
@@ -831,8 +861,11 @@ class PendulumSimulator:
                 for _ in range(steps):
                     s = self.physics.symplectic_euler_step(s, small, self.canvas.params, deriv_func)
                 self.canvas.state = s
-            # Winkel normalisieren (numerische Stabilität, klareres Verhalten)
-            self.canvas.state = self.physics.normalize_angles(self.canvas.state)
+            # Winkel normalisieren (seltener, für stabilere Darstellung)
+            self._norm_counter += 1
+            if self._norm_counter >= getattr(self, 'normalize_every_n', 1):
+                self.canvas.state = self.physics.normalize_angles(self.canvas.state)
+                self._norm_counter = 0
             
             self.canvas.time += sim_dt
 
@@ -859,19 +892,47 @@ class PendulumSimulator:
                     except Exception:
                         self.energy_err = 0.0
 
+                    # Energie-Drift Anzeige aktualisieren
+                    if hasattr(self, 'energy_label'):
+                        try:
+                            txt = f'ΔE/E: {self.energy_err * 100.0:.3f}%'
+                            ui.delay(lambda: setattr(self.energy_label, 'text', txt), 0)
+                        except Exception:
+                            pass
+
                     # AutoSwitch oder dt_max-Anpassung
                     if self.autoswitch and self.integrator == 'symplectic' and self.energy_err > self.energy_threshold:
+                        # Wechsel auf RK4 und Basiswerte setzen, Energie-Referenz neu setzen
                         self.integrator = 'rk4'
+                        self.base_dt = 0.004
+                        self.dt_max = 0.015
+                        self.energy_ref = e
                         if hasattr(self, 'integrator_control'):
                             try:
                                 ui.delay(lambda: setattr(self.integrator_control, 'selected_index', 0), 0)
+                            except Exception:
+                                pass
+                        if hasattr(self, 'dtmax_slider'):
+                            try:
+                                ui.delay(lambda: (setattr(self.dtmax_slider, 'value', self.dt_max), setattr(self.dtmax_value, 'text', f'{self.dt_max:.3f}')), 0)
+                            except Exception:
+                                pass
+                        if hasattr(self, 'basedt_slider'):
+                            try:
+                                ui.delay(lambda: (setattr(self.basedt_slider, 'value', self.base_dt), setattr(self.basedt_value, 'text', f'{self.base_dt:.3f}')), 0)
                             except Exception:
                                 pass
                     else:
                         if self.energy_err > self.energy_threshold * 0.5:
                             self.dt_max = max(0.001, self.dt_max * 0.85)
                         else:
-                            self.dt_max = min(0.05, self.dt_max * 1.05)
+                            upper = 0.015 if self.integrator == 'rk4' else 0.03
+                            self.dt_max = min(upper, self.dt_max * 1.05)
+                        if hasattr(self, 'dtmax_value'):
+                            try:
+                                ui.delay(lambda: setattr(self.dtmax_value, 'text', f'{self.dt_max:.3f}'), 0)
+                            except Exception:
+                                pass
             
             # Trail-Update
             if self.canvas.trail_enabled:
@@ -972,7 +1033,7 @@ class PendulumSimulator:
         else:
             self.integrator = 'symplectic'
             self.base_dt = 0.008
-            self.dt_max = 0.035
+            self.dt_max = 0.030
         # Energie-Referenz zurücksetzen
         self.energy_ref = None
         # Slider synchronisieren
