@@ -420,6 +420,7 @@ class PendulumSimulator:
         self.time_scale = 1.0
         self.thread = None
         self.stop_flag = False
+        self._last_time = None
         # Integrator/Physik-Parameter
         self.integrator = 'rk4'  # 'rk4' | 'symplectic'
         self.base_dt = 0.004
@@ -754,20 +755,22 @@ class PendulumSimulator:
             self.start_simulation()
     
     def start_simulation(self):
-        """Startet die Simulation"""
+        """Startet die Simulation — jetzt ohne Hintergrund-Thread, per ui.delay im Main-Thread."""
         if self.running:
             return
-        # set flags
         self.running = True
         self.stop_flag = False
         self.start_btn.title = 'Stop'
         self.start_btn.background_color = '#EF4444'
 
-        # initiale Parameter-Snapshot direkt aufrufen (Main-Thread)
+        # initiale Snapshot-Loop starten (Main-Thread)
         self._snapshot_running = True
-        self.snapshot_ui_parameters()  # startet periodische Nachplanung
+        self.snapshot_ui_parameters()
 
-        # Energie-Referenz initialisieren (ohne Dämpfung)
+        # Zeitbasis setzen
+        self._last_time = time.time()
+
+        # Energie-Referenz initialisieren
         try:
             damping = float(self.canvas.params.get('damping', 0.0))
         except Exception:
@@ -782,16 +785,9 @@ class PendulumSimulator:
             self.energy_ref = None
         self.energy_err = 0.0
         self._energy_accum = 0.0
-        if hasattr(self, 'energy_label'):
-            try:
-                ui.delay(lambda: setattr(self.energy_label, 'text', 'ΔE/E: 0.000%'), 0)
-            except Exception:
-                pass
 
-        # Simulationsthread starten (nutzt jetzt self.param_snapshot statt direkter UI-Zugriffe)
-        self.thread = threading.Thread(target=self.simulation_loop)
-        self.thread.daemon = True
-        self.thread.start()
+        # erste Step planen
+        ui.delay(self.simulation_step, 0)
 
     def snapshot_ui_parameters(self):
         """Kopiert UI-Parameter sicher vom Main-Thread in self.param_snapshot und
@@ -866,11 +862,16 @@ class PendulumSimulator:
         self._snapshot_running = False
     
     def stop_simulation(self):
-        """Stoppt die Simulation"""
+        """Stoppt die Simulation (main-thread scheduler)."""
         self.running = False
         self.stop_flag = True
-        self.start_btn.title = 'Start'
-        self.start_btn.background_color = '#10B981'
+        self._snapshot_running = False
+        # UI-Buttons sofort zurücksetzen
+        try:
+            self.start_btn.title = 'Start'
+            self.start_btn.background_color = '#10B981'
+        except Exception:
+            pass
     
     def reset_simulation(self, sender=None):
         """Setzt die Simulation zurück"""
@@ -901,181 +902,124 @@ class PendulumSimulator:
         self.energy_err = 0.0
         self._energy_accum = 0.0
     
-    def simulation_loop(self):
-        """Thread-safe Simulation: Physik lokal berechnen, UI nur via ui.delay updaten.
-        Fang Exceptions ab und zeige Meldung statt Absturz."""
-        last_time = time.time()
-        # lokale Kopie des Startzustands (keine UI-Lesezugriffe im Loop)
+    def simulation_step(self):
+        """Ein Simulationsschritt auf dem Main-Thread; plant sich selbst mit ui.delay erneut ein."""
+        # Abbruchbedingung
+        if not self.running or self.stop_flag:
+            return
+
+        # Zeit berechnen
+        now = time.time()
+        last = getattr(self, '_last_time', now)
+        elapsed = max(0.0, now - last)
+        self._last_time = now
+
+        # sichere Parameter (Snapshot) lesen
+        snap = dict(getattr(self, 'param_snapshot', self.canvas.params))
+        # Falls kein Snapshot vorhanden, benutze canvas.params (sicher, da main thread)
+        time_scale = snap.get('time_scale', self.time_scale)
+        sim_dt = max(0.0, elapsed * time_scale)
+
+        # choose deriv func
+        mode_snap = snap.get('mode', getattr(self.canvas, 'mode', 'double'))
+        deriv_func = self.physics.double_pendulum_derivatives if mode_snap == 'double' else self.physics.single_pendulum_derivatives
+
+        # phys params aus snapshot (oder canvas.params fallback)
+        params_for_phys = {
+            'm1': snap.get('m1', self.canvas.params.get('m1', 1.0)),
+            'm2': snap.get('m2', self.canvas.params.get('m2', 1.0)),
+            'l1': snap.get('l1', self.canvas.params.get('l1', 1.0)),
+            'l2': snap.get('l2', self.canvas.params.get('l2', 1.0)),
+            'g': snap.get('g', self.canvas.params.get('g', 9.81)),
+            'damping': snap.get('damping', self.canvas.params.get('damping', 0.0))
+        }
+
+        # state lokal (lesen + schreiben ist main-thread-safe)
         s = list(self.canvas.state)
 
+        # Integrator-Parameter
+        dt_max_used = snap.get('_dt_max', self.dt_max)
+        base_dt_used = snap.get('_base_dt', self.base_dt)
+
+        # Integration (s kann mehrere Substeps durchlaufen)
         try:
-            while self.running and not self.stop_flag:
-                current_time = time.time()
-                elapsed = current_time - last_time
-                last_time = current_time
-
-                # Benutze ausschließlich Snapshot (kein Zugriff auf UI-Objekte!)
-                snap = dict(self.param_snapshot)
-                self.time_scale = snap.get('time_scale', self.time_scale)
-                sim_dt = max(0.0, elapsed * self.time_scale)
-
-                # Wähle passende Ableitungsfunktion
-                mode_snap = snap.get('mode', 'double')
-                if mode_snap == 'double':
-                    deriv_func = self.physics.double_pendulum_derivatives
-                else:
-                    deriv_func = self.physics.single_pendulum_derivatives
-
-                # Integrator-Parameter aus Snapshot
-                dt_max_used = snap.get('_dt_max', self.dt_max)
-                base_dt_used = snap.get('_base_dt', self.base_dt)
-
-                # Erzeuge params-Dict rein aus Snapshot (keine canvas.params-Reads)
-                params_for_phys = {
-                    'm1': snap.get('m1', self.canvas.params.get('m1', 1.0)),
-                    'm2': snap.get('m2', self.canvas.params.get('m2', 1.0)),
-                    'l1': snap.get('l1', self.canvas.params.get('l1', 1.0)),
-                    'l2': snap.get('l2', self.canvas.params.get('l2', 1.0)),
-                    'g': snap.get('g', self.canvas.params.get('g', 9.81)),
-                    'damping': snap.get('damping', self.canvas.params.get('damping', 0.0))
-                }
-
-                # Integration (RK4 oder Symplectic)
-                if self.integrator == 'rk4':
-                    dtmx = min(dt_max_used, self.physics.choose_dt_max(s, base_dt=base_dt_used, max_dt=dt_max_used))
-                    s = self.physics.rk4_integrate_substeps(s, sim_dt, dtmx, params_for_phys, deriv_func)
-                else:
-                    dtmx = min(dt_max_used, self.physics.choose_dt_max(s, base_dt=max(0.008, base_dt_used * 2.0), max_dt=dt_max_used))
-                    steps = max(1, int(math.ceil(abs(sim_dt) / max(1e-9, dtmx))))
-                    small = float(sim_dt) / steps if steps else 0.0
-                    for _ in range(steps):
-                        s = self.physics.symplectic_euler_step(s, small, params_for_phys, deriv_func)
-
-                # Winkelnormalisierung seltener durchführen
-                self._norm_counter += 1
-                if self._norm_counter >= getattr(self, 'normalize_every_n', 1):
-                    s = self.physics.normalize_angles(s)
-                    self._norm_counter = 0
-
-                # Energie-Überwachung (nutze params_for_phys und s)
-                damping_val = params_for_phys.get('damping', 0.0)
-                if damping_val == 0.0:
-                    mode_for_energy = 'double' if mode_snap == 'double' else 'single'
-                    if self.energy_ref is None:
-                        try:
-                            self.energy_ref = self.physics.total_energy(s, params_for_phys, mode=mode_for_energy)
-                        except Exception:
-                            self.energy_ref = 0.0
-                    self._energy_accum += sim_dt
-                    if self._energy_accum >= self.energy_check_interval:
-                        self._energy_accum = 0.0
-                        try:
-                            e = self.physics.total_energy(s, params_for_phys, mode=mode_for_energy)
-                            e0 = self.energy_ref if self.energy_ref is not None else e
-                            denom = max(1e-9, abs(e0))
-                            self.energy_err = abs(e - e0) / denom
-                        except Exception:
-                            self.energy_err = 0.0
-
-                        # UI-Update der Energie-Anzeige (sicher auf Main-Thread)
-                        if hasattr(self, 'energy_label'):
-                            try:
-                                txt = f'ΔE/E: {self.energy_err * 100.0:.3f}%'
-                                ui.delay(lambda: setattr(self.energy_label, 'text', txt), 0)
-                            except Exception:
-                                pass
-
-                        # AutoSwitch etc. (nur änderungen an self.* ausführen; UI aktualisiert snapshot später)
-                        if self.autoswitch and self.integrator == 'symplectic' and self.energy_err > self.energy_threshold:
-                            self.integrator = 'rk4'
-                            self.base_dt = 0.004
-                            self.dt_max = 0.015
-                            self.energy_ref = e
-                            # update integrator UI controls safely
-                            def set_ui_integrator_idx():
-                                try:
-                                    self.integrator_control.selected_index = 0
-                                    self.dtmax_slider.value = self.dt_max
-                                    self.dtmax_value.text = f'{self.dt_max:.3f}'
-                                    self.basedt_slider.value = self.base_dt
-                                    self.basedt_value.text = f'{self.base_dt:.3f}'
-                                except Exception:
-                                    pass
-                            ui.delay(set_ui_integrator_idx, 0)
-                        else:
-                            if self.energy_err > self.energy_threshold * 0.5:
-                                self.dt_max = max(0.001, self.dt_max * 0.85)
-                            else:
-                                upper = 0.015 if self.integrator == 'rk4' else 0.03
-                                self.dt_max = min(upper, self.dt_max * 1.05)
-                            if hasattr(self, 'dtmax_value'):
-                                try:
-                                    ui.delay(lambda: setattr(self.dtmax_value, 'text', f'{self.dt_max:.3f}'), 0)
-                                except Exception:
-                                    pass
-
-                # Berechne Pixel-Koordinaten mit Werten aus dem Snapshot (keine canvas.width/height reads)
-                cw = snap.get('canvas_width', 800.0)
-                ch = snap.get('canvas_height', 600.0)
-                scale_px = snap.get('canvas_scale', getattr(self.canvas, 'scale', 150.0))
-                origin_x = cw / 2.0
-                origin_y = ch * 0.2
-                l1_px = params_for_phys.get('l1', 1.0) * scale_px
-                l2_px = params_for_phys.get('l2', 1.0) * scale_px
-
-                if mode_snap == 'double':
-                    th1, _, th2, _ = s
-                    x1 = origin_x + l1_px * math.sin(th1)
-                    y1 = origin_y + l1_px * math.cos(th1)
-                    x2 = x1 + l2_px * math.sin(th2)
-                    y2 = y1 + l2_px * math.cos(th2)
-
-                    def ui_update():
-                        try:
-                            # atomare UI-Änderungen nur auf Main-Thread
-                            self.canvas.state = list(s)
-                            self.canvas.time += sim_dt
-                            if self.canvas.trail_enabled:
-                                self.canvas.add_trail_point(x2, y2)
-                            self.canvas.set_needs_display()
-                        except Exception:
-                            pass
-                    ui.delay(ui_update, 0)
-                else:
-                    th1, _ = s[:2]
-                    x1 = origin_x + l1_px * math.sin(th1)
-                    y1 = origin_y + l1_px * math.cos(th1)
-
-                    def ui_update_single():
-                        try:
-                            self.canvas.state = list(s[:2])
-                            self.canvas.time += sim_dt
-                            if self.canvas.trail_enabled:
-                                self.canvas.add_trail_point(x1, y1)
-                            self.canvas.set_needs_display()
-                        except Exception:
-                            pass
-                    ui.delay(ui_update_single, 0)
-
-                # Begrenze CPU-Last
-                time.sleep(0.010)
-
-        except Exception as ex:
-            # Fehler auffangen: stoppe Simulation und zeige Alert (Main-Thread)
+            if self.integrator == 'rk4':
+                dtmx = min(dt_max_used, self.physics.choose_dt_max(s, base_dt=base_dt_used, max_dt=dt_max_used))
+                s = self.physics.rk4_integrate_substeps(s, sim_dt, dtmx, params_for_phys, deriv_func)
+            else:
+                dtmx = min(dt_max_used, self.physics.choose_dt_max(s, base_dt=max(0.008, base_dt_used * 2.0), max_dt=dt_max_used))
+                steps = max(1, int(math.ceil(abs(sim_dt) / max(1e-9, dtmx))))
+                small = float(sim_dt) / steps if steps else 0.0
+                for _ in range(steps):
+                    s = self.physics.symplectic_euler_step(s, small, params_for_phys, deriv_func)
+        except Exception as e:
+            # unrecoverable numeric error: stoppe sim und zeige alert (main thread)
             self.running = False
-            self.stop_flag = True
-            def show_error():
-                try:
-                    import ui as _ui
-                    _ui.alert('Simulationsfehler', f'Fehler im Simulations-Thread:\n{ex}', 'OK')
-                except Exception:
-                    print('Simulationsfehler:', ex)
-            ui.delay(show_error, 0)
-        finally:
-            # Snapshot-Loop stoppen, UI ggf. in konsistenten Zustand bringen
-            ui.delay(self.stop_parameter_snapshot, 0)
+            self._snapshot_running = False
+            ui.delay(lambda: ui.alert('Simulationsfehler', f'{e}', 'OK'), 0)
             ui.delay(lambda: setattr(self.start_btn, 'title', 'Start'), 0)
             ui.delay(lambda: setattr(self.start_btn, 'background_color', '#10B981'), 0)
+            return
+
+        # Winkel normalisieren seltener
+        self._norm_counter += 1
+        if self._norm_counter >= getattr(self, 'normalize_every_n', 1):
+            s = self.physics.normalize_angles(s)
+            self._norm_counter = 0
+
+        # Energieüberwachung (nur als Info)
+        if params_for_phys.get('damping', 0.0) == 0.0:
+            if self.energy_ref is None:
+                try:
+                    self.energy_ref = self.physics.total_energy(s, params_for_phys, mode=('double' if mode_snap == 'double' else 'single'))
+                except Exception:
+                    self.energy_ref = 0.0
+            self._energy_accum += sim_dt
+            if self._energy_accum >= self.energy_check_interval:
+                self._energy_accum = 0.0
+                try:
+                    e = self.physics.total_energy(s, params_for_phys, mode=('double' if mode_snap == 'double' else 'single'))
+                    denom = max(1e-9, abs(self.energy_ref if self.energy_ref is not None else e))
+                    self.energy_err = abs(e - (self.energy_ref if self.energy_ref is not None else e)) / denom
+                    if hasattr(self, 'energy_label'):
+                        self.energy_label.text = f'ΔE/E: {self.energy_err * 100.0:.3f}%'
+                except Exception:
+                    pass
+
+        # Pixel-Koord berechnen & Trail aktualisieren (main thread safe)
+        cw = snap.get('canvas_width', self.canvas.width)
+        ch = snap.get('canvas_height', self.canvas.height)
+        scale_px = snap.get('canvas_scale', self.canvas.scale)
+        origin_x = cw / 2.0
+        origin_y = ch * 0.2
+        l1_px = params_for_phys.get('l1', self.canvas.params.get('l1', 1.0)) * scale_px
+        l2_px = params_for_phys.get('l2', self.canvas.params.get('l2', 1.0)) * scale_px
+
+        if mode_snap == 'double':
+            th1, _, th2, _ = s
+            x1 = origin_x + l1_px * math.sin(th1)
+            y1 = origin_y + l1_px * math.cos(th1)
+            x2 = x1 + l2_px * math.sin(th2)
+            y2 = y1 + l2_px * math.cos(th2)
+            # atomar in canvas schreiben (main thread)
+            self.canvas.state = list(s)
+            self.canvas.time += sim_dt
+            if self.canvas.trail_enabled:
+                self.canvas.add_trail_point(x2, y2)
+        else:
+            th1, _ = s[:2]
+            x1 = origin_x + l1_px * math.sin(th1)
+            y1 = origin_y + l1_px * math.cos(th1)
+            self.canvas.state = list(s[:2])
+            self.canvas.time += sim_dt
+            if self.canvas.trail_enabled:
+                self.canvas.add_trail_point(x1, y1)
+
+        # Redraw
+        self.canvas.set_needs_display()
+
+        # nächsten Schritt planen (ca. 60 FPS; ui.delay mit 0 ist okay)
+        ui.delay(self.simulation_step, 0)
     
     def update_parameters(self):
         """Aktualisiert die Simulationsparameter"""
