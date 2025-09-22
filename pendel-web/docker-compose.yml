@@ -8,6 +8,7 @@ services:
     environment:
       - STREAMLIT_SERVER_ENABLECORS=true
       - STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION=true
+      - STREAMLIT_BROWSER_GATHERUSAGESTATS=false
     ports:
       - "127.0.0.1:18501:8501"  # bind only to loopback for reverse proxy isolation
     security_opt:
@@ -17,6 +18,12 @@ services:
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
+    pids_limit: 256
+    ulimits:
+      nofile: 1024
+    stop_grace_period: 5s
+    mem_limit: 256m
+    cpus: "0.50"
     volumes:
       - type: bind
         source: ./server/.streamlit
