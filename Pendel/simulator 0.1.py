@@ -33,25 +33,39 @@ class PendulumPhysics:
         l1, l2 = params['l1'], params['l2']
         g = params['g']
         damping = params.get('damping', 0.0)
-        
+
+        # Trigonometrie-Lookups lokal binden und cachen
+        sin = math.sin
+        cos = math.cos
+
         delta = th2 - th1
-        denom = (2 * m1 + m2 - m2 * math.cos(2 * delta))
-        
+        sin_th1 = sin(th1)
+        cos_th1 = cos(th1)
+        sin_th2 = sin(th2)
+        cos_th2 = cos(th2)
+        sin_delta = sin(delta)
+        cos_delta = cos(delta)
+        cos_2delta = cos(2.0 * delta)
+        sin_th1_minus_2th2 = sin(th1 - 2.0 * th2)
+
+        denom = (2.0 * m1 + m2 - m2 * cos_2delta)
         if abs(denom) < 1e-9:
             denom = 1e-9
-        
+
         # Erste Masse
-        num1 = -g * (2 * m1 + m2) * math.sin(th1)
-        num1 -= m2 * g * math.sin(th1 - 2 * th2)
-        num1 -= 2 * math.sin(delta) * m2 * (w2**2 * l2 + w1**2 * l1 * math.cos(delta))
+        num1 = -g * (2.0 * m1 + m2) * sin_th1
+        num1 -= m2 * g * sin_th1_minus_2th2
+        num1 -= 2.0 * sin_delta * m2 * (w2 * w2 * l2 + w1 * w1 * l1 * cos_delta)
         domega1 = num1 / (l1 * denom) - damping * w1
-        
+
         # Zweite Masse
-        num2 = 2 * math.sin(delta) * (w1**2 * l1 * (m1 + m2) + 
-                                      g * (m1 + m2) * math.cos(th1) + 
-                                      w2**2 * l2 * m2 * math.cos(delta))
+        num2 = 2.0 * sin_delta * (
+            w1 * w1 * l1 * (m1 + m2) +
+            g * (m1 + m2) * cos_th1 +
+            w2 * w2 * l2 * m2 * cos_delta
+        )
         domega2 = num2 / (l2 * denom) - damping * w2
-        
+
         return [w1, domega1, w2, domega2]
     
     @staticmethod
@@ -122,27 +136,32 @@ class PendulumPhysics:
     def total_energy(state, params, mode='double'):
         """Gesamtenergie (kinetisch + potenziell). Referenz y=0 am Aufhängepunkt."""
         g = float(params['g'])
+        cos = math.cos
+        sin = math.sin
         if mode == 'double' and len(state) == 4:
             th1, w1, th2, w2 = state
             m1 = float(params['m1']); m2 = float(params['m2'])
             l1 = float(params['l1']); l2 = float(params['l2'])
-            x1dot = l1 * w1 * math.cos(th1)
-            y1dot = -l1 * w1 * math.sin(th1)
-            x2dot = x1dot + l2 * w2 * math.cos(th2)
-            y2dot = y1dot - l2 * w2 * math.sin(th2)
-            KE = 0.5 * m1 * (x1dot**2 + y1dot**2) + 0.5 * m2 * (x2dot**2 + y2dot**2)
-            y1 = -l1 * math.cos(th1)
-            y2 = y1 - l2 * math.cos(th2)
+            cos_th1 = cos(th1); sin_th1 = sin(th1)
+            cos_th2 = cos(th2); sin_th2 = sin(th2)
+            x1dot = l1 * w1 * cos_th1
+            y1dot = -l1 * w1 * sin_th1
+            x2dot = x1dot + l2 * w2 * cos_th2
+            y2dot = y1dot - l2 * w2 * sin_th2
+            KE = 0.5 * m1 * (x1dot*x1dot + y1dot*y1dot) + 0.5 * m2 * (x2dot*x2dot + y2dot*y2dot)
+            y1 = -l1 * cos_th1
+            y2 = y1 - l2 * cos_th2
             PE = m1 * g * y1 + m2 * g * y2
             return KE + PE
         else:
             th, w = state[:2]
             m = float(params['m1'])
             l = float(params['l1'])
-            xdot = l * w * math.cos(th)
-            ydot = -l * w * math.sin(th)
-            KE = 0.5 * m * (xdot**2 + ydot**2)
-            y = -l * math.cos(th)
+            cos_th = cos(th); sin_th = sin(th)
+            xdot = l * w * cos_th
+            ydot = -l * w * sin_th
+            KE = 0.5 * m * (xdot*xdot + ydot*ydot)
+            y = -l * cos_th
             PE = m * g * y
             return KE + PE
 
@@ -500,6 +519,50 @@ class PendulumSimulator:
         self.autoswitch_switch.action = self.toggle_autoswitch
         panel.add_subview(self.autoswitch_switch)
         y_pos += 40
+
+        # Integrator-Parameter (dt_max & base_dt)
+        self.add_separator(panel, y_pos)
+        y_pos += 10
+
+        dtmax_label = ui.Label()
+        dtmax_label.text = 'dt_max (s):'
+        dtmax_label.frame = (10, y_pos, 100, 25)
+        panel.add_subview(dtmax_label)
+
+        self.dtmax_slider = ui.Slider()
+        self.dtmax_slider.minimum_value = 0.005
+        self.dtmax_slider.maximum_value = 0.10
+        self.dtmax_slider.value = self.dt_max
+        self.dtmax_slider.frame = (10, y_pos + 25, 230, 30)
+        self.dtmax_slider.action = self.update_dt_max
+        panel.add_subview(self.dtmax_slider)
+
+        self.dtmax_value = ui.Label()
+        self.dtmax_value.text = f'{self.dt_max:.3f}'
+        self.dtmax_value.alignment = ui.ALIGN_RIGHT
+        self.dtmax_value.frame = (245, y_pos + 25, 45, 30)
+        panel.add_subview(self.dtmax_value)
+        y_pos += 60
+
+        basedt_label = ui.Label()
+        basedt_label.text = 'base_dt (s):'
+        basedt_label.frame = (10, y_pos, 100, 25)
+        panel.add_subview(basedt_label)
+
+        self.basedt_slider = ui.Slider()
+        self.basedt_slider.minimum_value = 0.001
+        self.basedt_slider.maximum_value = 0.02
+        self.basedt_slider.value = self.base_dt
+        self.basedt_slider.frame = (10, y_pos + 25, 230, 30)
+        self.basedt_slider.action = self.update_base_dt
+        panel.add_subview(self.basedt_slider)
+
+        self.basedt_value = ui.Label()
+        self.basedt_value.text = f'{self.base_dt:.3f}'
+        self.basedt_value.alignment = ui.ALIGN_RIGHT
+        self.basedt_value.frame = (245, y_pos + 25, 45, 30)
+        panel.add_subview(self.basedt_value)
+        y_pos += 60
         
         # Spur-Kontrollen
         self.add_separator(panel, y_pos)
@@ -758,6 +821,22 @@ class PendulumSimulator:
         self.time_scale = sender.value
         self.speed_value.text = f'{sender.value:.1f}x'
 
+    def update_dt_max(self, sender):
+        """Aktualisiert dt_max aus dem Slider"""
+        try:
+            self.dt_max = max(0.0005, float(sender.value))
+        except Exception:
+            pass
+        self.dtmax_value.text = f'{self.dt_max:.3f}'
+
+    def update_base_dt(self, sender):
+        """Aktualisiert base_dt aus dem Slider"""
+        try:
+            self.base_dt = max(0.0005, float(sender.value))
+        except Exception:
+            pass
+        self.basedt_value.text = f'{self.base_dt:.3f}'
+
     def change_integrator(self, sender):
         """Wechselt den Integrator-Modus"""
         idx = getattr(sender, 'selected_index', 0)
@@ -771,6 +850,19 @@ class PendulumSimulator:
             self.dt_max = 0.035
         # Energie-Referenz zurücksetzen
         self.energy_ref = None
+        # Slider synchronisieren
+        if hasattr(self, 'dtmax_slider'):
+            try:
+                self.dtmax_slider.value = self.dt_max
+                self.dtmax_value.text = f'{self.dt_max:.3f}'
+            except Exception:
+                pass
+        if hasattr(self, 'basedt_slider'):
+            try:
+                self.basedt_slider.value = self.base_dt
+                self.basedt_value.text = f'{self.base_dt:.3f}'
+            except Exception:
+                pass
 
     def toggle_autoswitch(self, sender):
         """Schaltet AutoSwitch bei Energie-Drift um"""
