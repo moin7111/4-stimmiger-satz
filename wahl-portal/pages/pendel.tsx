@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type Mode = "double" | "single";
 type Integrator = "rk4" | "symplectic";
@@ -199,7 +199,84 @@ export default function Pendel() {
     damping: 0,
   });
 
+  // Draw function
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const width = canvas.width;
+    const height = canvas.height;
+    ctx.clearRect(0, 0, width, height);
 
+    // background
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, width, height);
+
+    // grid
+    ctx.strokeStyle = "#E5E7EB";
+    ctx.lineWidth = 0.5;
+    const grid = 50;
+    for (let x = 0; x <= width; x += grid) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
+    }
+    for (let y = 0; y <= height; y += grid) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
+    }
+
+    const originX = width / 2;
+    const originY = height * 0.2;
+    const l1 = params.l1 * pixelsPerMeter;
+    const l2 = params.l2 * pixelsPerMeter;
+
+    let x1 = originX, y1 = originY;
+    let x2 = originX, y2 = originY;
+    if (mode === "double" && state.length === 4) {
+      const [th1, , th2] = state as Vec4;
+      const p1 = polarToXY({ x: originX, y: originY }, th1, l1);
+      const p2 = polarToXY({ x: p1.x, y: p1.y }, th2, l2);
+      x1 = p1.x; y1 = p1.y; x2 = p2.x; y2 = p2.y;
+    } else {
+      const [th1] = state as Vec2;
+      const p1 = polarToXY({ x: originX, y: originY }, th1, l1);
+      x1 = p1.x; y1 = p1.y; x2 = x1; y2 = y1;
+    }
+
+    // trail
+    if (trailEnabled && trail.length > 1) {
+      for (let i = 1; i < trail.length; i++) {
+        const alpha = 0.3 + 0.7 * (i / trail.length);
+        ctx.strokeStyle = `rgba(31, 99, 181, ${alpha.toFixed(3)})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(trail[i - 1].x, trail[i - 1].y); ctx.lineTo(trail[i].x, trail[i].y); ctx.stroke();
+      }
+    }
+
+    // rods
+    ctx.strokeStyle = "#374151";
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(originX, originY); ctx.lineTo(x1, y1); ctx.stroke();
+    if (mode === "double") {
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    }
+
+    // masses
+    ctx.fillStyle = "#2563EB";
+    ctx.beginPath(); ctx.ellipse(x1, y1, 10, 10, 0, 0, Math.PI * 2); ctx.fill();
+    if (mode === "double") {
+      ctx.fillStyle = "#DC2626";
+      ctx.beginPath(); ctx.ellipse(x2, y2, 8, 8, 0, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // pivot
+    ctx.fillStyle = "#1F2937";
+    ctx.beginPath(); ctx.ellipse(originX, originY, 5, 5, 0, 0, Math.PI * 2); ctx.fill();
+
+    // time text
+    ctx.fillStyle = "#374151";
+    ctx.font = "14px Helvetica";
+    ctx.fillText(`Zeit: ${simTime.toFixed(2)} s`, 10, height - 20);
+  }, [canvasRef, params, pixelsPerMeter, mode, state, trailEnabled, trail, simTime]);
 
   // Resize canvas and compute pixels per meter based on container
   useEffect(() => {
@@ -315,86 +392,9 @@ export default function Pendel() {
       if (animRef.current) cancelAnimationFrame(animRef.current);
       animRef.current = null;
     };
-  }, [running, state, mode, params, timeScale, integrator, baseDt, dtMax, trailEnabled, pixelsPerMeter, energyRef, autoswitch]);
+  }, [running, state, mode, params, timeScale, integrator, baseDt, dtMax, trailEnabled, pixelsPerMeter, energyRef, autoswitch, draw]);
 
-  // Draw function
-  function draw() {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const width = canvas.width;
-    const height = canvas.height;
-    ctx.clearRect(0, 0, width, height);
-
-    // background
-    ctx.fillStyle = "#FFFFFF";
-    ctx.fillRect(0, 0, width, height);
-
-    // grid
-    ctx.strokeStyle = "#E5E7EB";
-    ctx.lineWidth = 0.5;
-    const grid = 50;
-    for (let x = 0; x <= width; x += grid) {
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
-    }
-    for (let y = 0; y <= height; y += grid) {
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
-    }
-
-    const originX = width / 2;
-    const originY = height * 0.2;
-    const l1 = params.l1 * pixelsPerMeter;
-    const l2 = params.l2 * pixelsPerMeter;
-
-    let x1 = originX, y1 = originY;
-    let x2 = originX, y2 = originY;
-    if (mode === "double" && state.length === 4) {
-      const [th1, , th2] = state as Vec4;
-      const p1 = polarToXY({ x: originX, y: originY }, th1, l1);
-      const p2 = polarToXY({ x: p1.x, y: p1.y }, th2, l2);
-      x1 = p1.x; y1 = p1.y; x2 = p2.x; y2 = p2.y;
-    } else {
-      const [th1] = state as Vec2;
-      const p1 = polarToXY({ x: originX, y: originY }, th1, l1);
-      x1 = p1.x; y1 = p1.y; x2 = x1; y2 = y1;
-    }
-
-    // trail
-    if (trailEnabled && trail.length > 1) {
-      for (let i = 1; i < trail.length; i++) {
-        const alpha = 0.3 + 0.7 * (i / trail.length);
-        ctx.strokeStyle = `rgba(31, 99, 181, ${alpha.toFixed(3)})`;
-        ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(trail[i - 1].x, trail[i - 1].y); ctx.lineTo(trail[i].x, trail[i].y); ctx.stroke();
-      }
-    }
-
-    // rods
-    ctx.strokeStyle = "#374151";
-    ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(originX, originY); ctx.lineTo(x1, y1); ctx.stroke();
-    if (mode === "double") {
-      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-    }
-
-    // masses
-    ctx.fillStyle = "#2563EB";
-    ctx.beginPath(); ctx.ellipse(x1, y1, 10, 10, 0, 0, Math.PI * 2); ctx.fill();
-    if (mode === "double") {
-      ctx.fillStyle = "#DC2626";
-      ctx.beginPath(); ctx.ellipse(x2, y2, 8, 8, 0, 0, Math.PI * 2); ctx.fill();
-    }
-
-    // pivot
-    ctx.fillStyle = "#1F2937";
-    ctx.beginPath(); ctx.ellipse(originX, originY, 5, 5, 0, 0, Math.PI * 2); ctx.fill();
-
-    // time text
-    ctx.fillStyle = "#374151";
-    ctx.font = "14px Helvetica";
-    ctx.fillText(`Zeit: ${simTime.toFixed(2)} s`, 10, height - 20);
-  }
+  // (moved draw above)
 
   // Drag interaction
   const dragRef = useRef<null | "bob1" | "bob2">(null);
@@ -406,7 +406,7 @@ export default function Pendel() {
       const rect = canvas.getBoundingClientRect();
       const tx = e.clientX - rect.left; const ty = e.clientY - rect.top;
       const originX = canvas.width / 2; const originY = canvas.height * 0.2;
-      const l1 = params.l1 * pixelsPerMeter; const l2 = params.l2 * pixelsPerMeter;
+      const l1 = params.l1 * pixelsPerMeter;
       let x1: number, y1: number, x2: number, y2: number;
       if (mode === "double" && state.length === 4) {
         const [th1, , th2] = state as Vec4;
@@ -432,7 +432,7 @@ export default function Pendel() {
       const l1 = params.l1 * pixelsPerMeter; const l2 = params.l2 * pixelsPerMeter;
       if (dragRef.current === "bob1") {
         const th1 = xyToAngle({ x: originX, y: originY }, { x: tx, y: ty });
-        if (mode === "double") setState((prev) => {
+        if (mode === "double") setState((prev: number[]) => {
           const prev4 = prev as Vec4; return normalizeAngles([th1, 0, prev4[2], prev4[3]]);
         });
         else setState(() => normalizeAngles([th1, 0]));
@@ -444,7 +444,7 @@ export default function Pendel() {
         const th1 = (state as Vec4)[0];
         const p1 = polarToXY({ x: originX, y: originY }, th1, l1);
         const th2 = xyToAngle({ x: p1.x, y: p1.y }, { x: tx, y: ty });
-        setState((prev) => {
+        setState((prev: number[]) => {
           const prev4 = prev as Vec4; return normalizeAngles([prev4[0], prev4[1], th2, 0]);
         });
         setStartState([th1, (state as Vec4)[1], th2, 0]);
@@ -464,7 +464,7 @@ export default function Pendel() {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
     };
-  }, [canvasRef, params, pixelsPerMeter, mode, state, running]);
+  }, [canvasRef, params, pixelsPerMeter, mode, state, running, draw]);
 
   function toggleRun() {
     setRunning((r: boolean) => !r);
@@ -509,7 +509,7 @@ export default function Pendel() {
   }
 
   // Initial draw once mounted
-  useEffect(() => { draw(); }, []);
+  useEffect(() => { draw(); }, [draw]);
 
   return (
     <div className="min-h-screen p-4" style={{ background: "#F3F4F6" }}>
