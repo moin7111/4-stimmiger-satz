@@ -1,6 +1,4 @@
-// @ts-nocheck
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Mode = "double" | "single";
 type Integrator = "rk4" | "symplectic";
@@ -64,7 +62,7 @@ function derivsDouble(state: Vec4, params: Params): Vec4 {
   num1 -= 2 * sinDelta * m2 * (w2 * w2 * l2 + w1 * w1 * l1 * cosDelta);
   let domega1 = num1 / (l1 * denom);
 
-  let num2 = 2 * sinDelta * (w1 * w1 * l1 * (m1 + m2) + g * (m1 + m2) * Math.cos(th1) + w2 * w2 * l2 * m2 * cosDelta);
+  const num2 = 2 * sinDelta * (w1 * w1 * l1 * (m1 + m2) + g * (m1 + m2) * Math.cos(th1) + w2 * w2 * l2 * m2 * cosDelta);
   let domega2 = num2 / (l2 * denom);
 
   if (damping) {
@@ -87,7 +85,7 @@ function rk4Step<T extends number[]>(state: T, dt: number, params: Params, f: (s
   return out;
 }
 
-function symplecticEulerStep(state: number[], dt: number, params: Params, f: (s: any, p: Params) => number[]): number[] {
+function symplecticEulerStep(state: number[], dt: number, params: Params, f: (s: number[], p: Params) => number[]): number[] {
   const n = state.length;
   if (n === 4) {
     let [th1, w1, th2, w2] = state as Vec4;
@@ -190,7 +188,7 @@ export default function Pendel() {
   const [energyErr, setEnergyErr] = useState(0);
   const [autoswitch, setAutoswitch] = useState(true);
   const energyThreshold = 0.1;
-  const [startState, setStartState] = useState<number[]>([Math.PI * 120 / 180, 0, Math.PI * -10 / 180, 0]);
+  const [, setStartState] = useState<number[]>([Math.PI * 120 / 180, 0, Math.PI * -10 / 180, 0]);
 
   const [params, setParams] = useState<Params>({
     m1: 1,
@@ -201,7 +199,7 @@ export default function Pendel() {
     damping: 0,
   });
 
-  const origin = useMemo(() => ({ x: 0, y: 0 }), []);
+
 
   // Resize canvas and compute pixels per meter based on container
   useEffect(() => {
@@ -235,12 +233,15 @@ export default function Pendel() {
       lastTsRef.current = ts;
       const realDt = elapsedMs / 1000;
       const dtTotal = Math.max(0, realDt * timeScale);
-      const f = (mode === "double" ? derivsDouble : derivsSingle) as any;
+      const f: (s: number[], p: Params) => number[] =
+        mode === "double"
+          ? ((s: number[], p: Params) => derivsDouble(s as Vec4, p))
+          : ((s: number[], p: Params) => derivsSingle(s as Vec2, p));
       const modeStr: Mode = mode;
       let nextState: number[];
       if (integrator === "rk4") {
         const dtmx = Math.min(dtMax, chooseDtMax(state, baseDt, dtMax));
-        nextState = rk4IntegrateSubsteps(state as any, dtTotal, dtmx, params, f);
+        nextState = rk4IntegrateSubsteps<number[]>(state, dtTotal, dtmx, params, f);
       } else {
         const dtmx = Math.min(dtMax, chooseDtMax(state, Math.max(0.008, baseDt * 2), dtMax));
         const steps = Math.max(1, Math.ceil(Math.abs(dtTotal) / Math.max(1e-9, dtmx)));
@@ -434,7 +435,7 @@ export default function Pendel() {
         if (mode === "double") setState((prev) => {
           const prev4 = prev as Vec4; return normalizeAngles([th1, 0, prev4[2], prev4[3]]);
         });
-        else setState(() => normalizeAngles([th1, 0] as any));
+        else setState(() => normalizeAngles([th1, 0]));
         setStartState(() => {
           if (mode === "double") return [th1, 0, (state as Vec4)[2], (state as Vec4)[3]];
           return [th1, 0];
@@ -444,7 +445,7 @@ export default function Pendel() {
         const p1 = polarToXY({ x: originX, y: originY }, th1, l1);
         const th2 = xyToAngle({ x: p1.x, y: p1.y }, { x: tx, y: ty });
         setState((prev) => {
-          const prev4 = prev as Vec4; return normalizeAngles([prev4[0], prev4[1], th2, 0] as any);
+          const prev4 = prev as Vec4; return normalizeAngles([prev4[0], prev4[1], th2, 0]);
         });
         setStartState([th1, (state as Vec4)[1], th2, 0]);
       }
@@ -466,7 +467,7 @@ export default function Pendel() {
   }, [canvasRef, params, pixelsPerMeter, mode, state, running]);
 
   function toggleRun() {
-    setRunning((r) => !r);
+    setRunning((r: boolean) => !r);
   }
 
   function doReset() {
@@ -500,7 +501,7 @@ export default function Pendel() {
   }
 
   function applyParam(field: keyof Params, value: number) {
-    setParams((p) => ({ ...p, [field]: value }));
+    setParams((p: Params) => ({ ...p, [field]: value }));
   }
 
   function clearTrail() {
