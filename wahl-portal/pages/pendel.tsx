@@ -1,6 +1,4 @@
-// @ts-nocheck
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type Mode = "double" | "single";
 type Integrator = "rk4" | "symplectic";
@@ -64,7 +62,7 @@ function derivsDouble(state: Vec4, params: Params): Vec4 {
   num1 -= 2 * sinDelta * m2 * (w2 * w2 * l2 + w1 * w1 * l1 * cosDelta);
   let domega1 = num1 / (l1 * denom);
 
-  let num2 = 2 * sinDelta * (w1 * w1 * l1 * (m1 + m2) + g * (m1 + m2) * Math.cos(th1) + w2 * w2 * l2 * m2 * cosDelta);
+  const num2 = 2 * sinDelta * (w1 * w1 * l1 * (m1 + m2) + g * (m1 + m2) * Math.cos(th1) + w2 * w2 * l2 * m2 * cosDelta);
   let domega2 = num2 / (l2 * denom);
 
   if (damping) {
@@ -87,7 +85,7 @@ function rk4Step<T extends number[]>(state: T, dt: number, params: Params, f: (s
   return out;
 }
 
-function symplecticEulerStep(state: number[], dt: number, params: Params, f: (s: any, p: Params) => number[]): number[] {
+function symplecticEulerStep(state: number[], dt: number, params: Params, f: (s: number[], p: Params) => number[]): number[] {
   const n = state.length;
   if (n === 4) {
     let [th1, w1, th2, w2] = state as Vec4;
@@ -190,7 +188,7 @@ export default function Pendel() {
   const [energyErr, setEnergyErr] = useState(0);
   const [autoswitch, setAutoswitch] = useState(true);
   const energyThreshold = 0.1;
-  const [startState, setStartState] = useState<number[]>([Math.PI * 120 / 180, 0, Math.PI * -10 / 180, 0]);
+  const [, setStartState] = useState<number[]>([Math.PI * 120 / 180, 0, Math.PI * -10 / 180, 0]);
 
   const [params, setParams] = useState<Params>({
     m1: 1,
@@ -201,123 +199,8 @@ export default function Pendel() {
     damping: 0,
   });
 
-  const origin = useMemo(() => ({ x: 0, y: 0 }), []);
-
-  // Resize canvas and compute pixels per meter based on container
-  useEffect(() => {
-    function handleResize() {
-      const canvas = canvasRef.current; const container = containerRef.current;
-      if (!canvas || !container) return;
-      const rect = container.getBoundingClientRect();
-      const width = Math.max(320, rect.width);
-      const height = Math.max(360, rect.height);
-      canvas.width = Math.floor(width);
-      canvas.height = Math.floor(height);
-      const ppm = Math.max(100, Math.min(260, Math.floor(Math.min(width, height) * 0.22)));
-      setPixelsPerMeter(ppm);
-    }
-    handleResize();
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
-  // Simulation loop
-  useEffect(() => {
-    if (!running) {
-      if (animRef.current) cancelAnimationFrame(animRef.current);
-      animRef.current = null;
-      lastTsRef.current = null;
-      return;
-    }
-    const step = (ts: number) => {
-      if (lastTsRef.current == null) lastTsRef.current = ts;
-      const elapsedMs = ts - lastTsRef.current;
-      lastTsRef.current = ts;
-      const realDt = elapsedMs / 1000;
-      const dtTotal = Math.max(0, realDt * timeScale);
-      const f = (mode === "double" ? derivsDouble : derivsSingle) as any;
-      const modeStr: Mode = mode;
-      let nextState: number[];
-      if (integrator === "rk4") {
-        const dtmx = Math.min(dtMax, chooseDtMax(state, baseDt, dtMax));
-        nextState = rk4IntegrateSubsteps(state as any, dtTotal, dtmx, params, f);
-      } else {
-        const dtmx = Math.min(dtMax, chooseDtMax(state, Math.max(0.008, baseDt * 2), dtMax));
-        const steps = Math.max(1, Math.ceil(Math.abs(dtTotal) / Math.max(1e-9, dtmx)));
-        const small = dtTotal / steps;
-        let s = state.slice();
-        for (let i = 0; i < steps; i++) s = symplecticEulerStep(s, small, params, f);
-        nextState = s;
-      }
-      nextState = normalizeAngles(nextState);
-      setState(nextState);
-      setSimTime((t: number) => t + dtTotal);
-
-      // Energy check (without damping)
-      if ((params.damping || 0) === 0) {
-        energyAccRef.current += dtTotal;
-        let eRef = energyRef;
-        if (eRef == null) {
-          eRef = totalEnergy(nextState, params, modeStr);
-          setEnergyRef(eRef);
-        }
-        if (energyAccRef.current >= 0.5) {
-          energyAccRef.current = 0;
-          const e = totalEnergy(nextState, params, modeStr);
-          const denom = Math.max(1e-9, Math.abs(eRef ?? e));
-          const err = Math.abs(e - (eRef ?? e)) / denom;
-          setEnergyErr(err);
-          if (autoswitch && integrator === "symplectic" && err > energyThreshold) {
-            setIntegrator("rk4");
-            setBaseDt(0.004);
-            setDtMax(0.015);
-            setEnergyRef(e);
-          } else {
-            if (err > energyThreshold * 0.5) setDtMax((v: number) => Math.max(0.001, v * 0.85));
-            else setDtMax((v: number) => Math.min(integrator === "rk4" ? 0.015 : 0.03, v * 1.05));
-          }
-        }
-      }
-
-      // trail
-      if (trailEnabled) {
-        const canvas = canvasRef.current;
-        if (canvas) {
-          const width = canvas.width; const height = canvas.height;
-          const originX = width / 2; const originY = height * 0.2;
-          const l1 = params.l1 * pixelsPerMeter; const l2 = params.l2 * pixelsPerMeter;
-          let px: number, py: number;
-          if (mode === "double" && nextState.length === 4) {
-            const [th1, , th2] = nextState as Vec4;
-            const p1 = polarToXY({ x: originX, y: originY }, th1, l1);
-            const p2 = polarToXY({ x: p1.x, y: p1.y }, th2, l2);
-            px = p2.x; py = p2.y;
-          } else {
-            const [th1] = nextState as Vec2;
-            const p1 = polarToXY({ x: originX, y: originY }, th1, l1);
-            px = p1.x; py = p1.y;
-          }
-          setTrail((arr: Array<{ x: number; y: number }>) => {
-            const n = arr.length;
-            const copy = n > 300 ? arr.slice(n - 299) : arr.slice();
-            copy.push({ x: px, y: py });
-            return copy;
-          });
-        }
-      }
-
-      draw();
-      animRef.current = requestAnimationFrame(step);
-    };
-    animRef.current = requestAnimationFrame(step);
-    return () => {
-      if (animRef.current) cancelAnimationFrame(animRef.current);
-      animRef.current = null;
-    };
-  }, [running, state, mode, params, timeScale, integrator, baseDt, dtMax, trailEnabled, pixelsPerMeter, energyRef, autoswitch]);
-
   // Draw function
-  function draw() {
+  const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -393,7 +276,125 @@ export default function Pendel() {
     ctx.fillStyle = "#374151";
     ctx.font = "14px Helvetica";
     ctx.fillText(`Zeit: ${simTime.toFixed(2)} s`, 10, height - 20);
-  }
+  }, [canvasRef, params, pixelsPerMeter, mode, state, trailEnabled, trail, simTime]);
+
+  // Resize canvas and compute pixels per meter based on container
+  useEffect(() => {
+    function handleResize() {
+      const canvas = canvasRef.current; const container = containerRef.current;
+      if (!canvas || !container) return;
+      const rect = container.getBoundingClientRect();
+      const width = Math.max(320, rect.width);
+      const height = Math.max(360, rect.height);
+      canvas.width = Math.floor(width);
+      canvas.height = Math.floor(height);
+      const ppm = Math.max(100, Math.min(260, Math.floor(Math.min(width, height) * 0.22)));
+      setPixelsPerMeter(ppm);
+    }
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  // Simulation loop
+  useEffect(() => {
+    if (!running) {
+      if (animRef.current) cancelAnimationFrame(animRef.current);
+      animRef.current = null;
+      lastTsRef.current = null;
+      return;
+    }
+    const step = (ts: number) => {
+      if (lastTsRef.current == null) lastTsRef.current = ts;
+      const elapsedMs = ts - lastTsRef.current;
+      lastTsRef.current = ts;
+      const realDt = elapsedMs / 1000;
+      const dtTotal = Math.max(0, realDt * timeScale);
+      const f: (s: number[], p: Params) => number[] =
+        mode === "double"
+          ? ((s: number[], p: Params) => derivsDouble(s as Vec4, p))
+          : ((s: number[], p: Params) => derivsSingle(s as Vec2, p));
+      const modeStr: Mode = mode;
+      let nextState: number[];
+      if (integrator === "rk4") {
+        const dtmx = Math.min(dtMax, chooseDtMax(state, baseDt, dtMax));
+        nextState = rk4IntegrateSubsteps<number[]>(state, dtTotal, dtmx, params, f);
+      } else {
+        const dtmx = Math.min(dtMax, chooseDtMax(state, Math.max(0.008, baseDt * 2), dtMax));
+        const steps = Math.max(1, Math.ceil(Math.abs(dtTotal) / Math.max(1e-9, dtmx)));
+        const small = dtTotal / steps;
+        let s = state.slice();
+        for (let i = 0; i < steps; i++) s = symplecticEulerStep(s, small, params, f);
+        nextState = s;
+      }
+      nextState = normalizeAngles(nextState);
+      setState(nextState);
+      setSimTime((t: number) => t + dtTotal);
+
+      // Energy check (without damping)
+      if ((params.damping || 0) === 0) {
+        energyAccRef.current += dtTotal;
+        let eRef = energyRef;
+        if (eRef == null) {
+          eRef = totalEnergy(nextState, params, modeStr);
+          setEnergyRef(eRef);
+        }
+        if (energyAccRef.current >= 0.5) {
+          energyAccRef.current = 0;
+          const e = totalEnergy(nextState, params, modeStr);
+          const denom = Math.max(1e-9, Math.abs(eRef ?? e));
+          const err = Math.abs(e - (eRef ?? e)) / denom;
+          setEnergyErr(err);
+          if (autoswitch && integrator === "symplectic" && err > energyThreshold) {
+            setIntegrator("rk4");
+            setBaseDt(0.004);
+            setDtMax(0.015);
+            setEnergyRef(e);
+          } else {
+            if (err > energyThreshold * 0.5) setDtMax((v: number) => Math.max(0.001, v * 0.85));
+            else setDtMax((v: number) => Math.min(integrator === "rk4" ? 0.015 : 0.03, v * 1.05));
+          }
+        }
+      }
+
+      // trail
+      if (trailEnabled) {
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const width = canvas.width; const height = canvas.height;
+          const originX = width / 2; const originY = height * 0.2;
+          const l1 = params.l1 * pixelsPerMeter; const l2 = params.l2 * pixelsPerMeter;
+          let px: number, py: number;
+          if (mode === "double" && nextState.length === 4) {
+            const [th1, , th2] = nextState as Vec4;
+            const p1 = polarToXY({ x: originX, y: originY }, th1, l1);
+            const p2 = polarToXY({ x: p1.x, y: p1.y }, th2, l2);
+            px = p2.x; py = p2.y;
+          } else {
+            const [th1] = nextState as Vec2;
+            const p1 = polarToXY({ x: originX, y: originY }, th1, l1);
+            px = p1.x; py = p1.y;
+          }
+          setTrail((arr: Array<{ x: number; y: number }>) => {
+            const n = arr.length;
+            const copy = n > 300 ? arr.slice(n - 299) : arr.slice();
+            copy.push({ x: px, y: py });
+            return copy;
+          });
+        }
+      }
+
+      draw();
+      animRef.current = requestAnimationFrame(step);
+    };
+    animRef.current = requestAnimationFrame(step);
+    return () => {
+      if (animRef.current) cancelAnimationFrame(animRef.current);
+      animRef.current = null;
+    };
+  }, [running, state, mode, params, timeScale, integrator, baseDt, dtMax, trailEnabled, pixelsPerMeter, energyRef, autoswitch, draw]);
+
+  // (moved draw above)
 
   // Drag interaction
   const dragRef = useRef<null | "bob1" | "bob2">(null);
@@ -405,7 +406,7 @@ export default function Pendel() {
       const rect = canvas.getBoundingClientRect();
       const tx = e.clientX - rect.left; const ty = e.clientY - rect.top;
       const originX = canvas.width / 2; const originY = canvas.height * 0.2;
-      const l1 = params.l1 * pixelsPerMeter; const l2 = params.l2 * pixelsPerMeter;
+      const l1 = params.l1 * pixelsPerMeter;
       let x1: number, y1: number, x2: number, y2: number;
       if (mode === "double" && state.length === 4) {
         const [th1, , th2] = state as Vec4;
@@ -431,10 +432,10 @@ export default function Pendel() {
       const l1 = params.l1 * pixelsPerMeter; const l2 = params.l2 * pixelsPerMeter;
       if (dragRef.current === "bob1") {
         const th1 = xyToAngle({ x: originX, y: originY }, { x: tx, y: ty });
-        if (mode === "double") setState((prev) => {
+        if (mode === "double") setState((prev: number[]) => {
           const prev4 = prev as Vec4; return normalizeAngles([th1, 0, prev4[2], prev4[3]]);
         });
-        else setState(() => normalizeAngles([th1, 0] as any));
+        else setState(() => normalizeAngles([th1, 0]));
         setStartState(() => {
           if (mode === "double") return [th1, 0, (state as Vec4)[2], (state as Vec4)[3]];
           return [th1, 0];
@@ -443,8 +444,8 @@ export default function Pendel() {
         const th1 = (state as Vec4)[0];
         const p1 = polarToXY({ x: originX, y: originY }, th1, l1);
         const th2 = xyToAngle({ x: p1.x, y: p1.y }, { x: tx, y: ty });
-        setState((prev) => {
-          const prev4 = prev as Vec4; return normalizeAngles([prev4[0], prev4[1], th2, 0] as any);
+        setState((prev: number[]) => {
+          const prev4 = prev as Vec4; return normalizeAngles([prev4[0], prev4[1], th2, 0]);
         });
         setStartState([th1, (state as Vec4)[1], th2, 0]);
       }
@@ -463,10 +464,10 @@ export default function Pendel() {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
     };
-  }, [canvasRef, params, pixelsPerMeter, mode, state, running]);
+  }, [canvasRef, params, pixelsPerMeter, mode, state, running, draw]);
 
   function toggleRun() {
-    setRunning((r) => !r);
+    setRunning((r: boolean) => !r);
   }
 
   function doReset() {
@@ -500,7 +501,7 @@ export default function Pendel() {
   }
 
   function applyParam(field: keyof Params, value: number) {
-    setParams((p) => ({ ...p, [field]: value }));
+    setParams((p: Params) => ({ ...p, [field]: value }));
   }
 
   function clearTrail() {
@@ -508,7 +509,7 @@ export default function Pendel() {
   }
 
   // Initial draw once mounted
-  useEffect(() => { draw(); }, []);
+  useEffect(() => { draw(); }, [draw]);
 
   return (
     <div className="min-h-screen p-4" style={{ background: "#F3F4F6" }}>

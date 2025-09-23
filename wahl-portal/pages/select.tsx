@@ -23,7 +23,7 @@ export default function Select() {
   const [choice2, setChoice2] = useState<number | "">("");
   const [choice3, setChoice3] = useState<number | "">("");
   const [directChoice, setDirectChoice] = useState<number | "">("");
-  const [message, setMessage] = useState<string | null>(null);
+  const [message] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
